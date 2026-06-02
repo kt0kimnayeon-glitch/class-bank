@@ -21,6 +21,419 @@
             }
         })();
 
+        // =========================================================================
+        // ★ [FIREBASE 설정 정보 입력]
+        // 깃허브 배포 시 본인의 Firebase 프로젝트 설정 키값을 아래 객체에 입력해 주십시오.
+        // =========================================================================
+        const firebaseConfig = {
+          apiKey: "AIzaSyChTj-BwhtnWcZkDHY1qj9cMPdDzK990A0",
+          authDomain: "class-bank-50589.firebaseapp.com",
+          projectId: "class-bank-50589",
+          storageBucket: "class-bank-50589.firebasestorage.app",
+          messagingSenderId: "958817151673",
+          appId: "1:958817151673:web:8540e79888a17294cc0968",
+          measurementId: "G-PY3H89ETJE"
+        };
+        
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        
+        const fs = firebase.firestore();
+        const storage = firebase.storage();
+
+        // 글로벌 로딩 스피너 제어 함수
+        function showSpinner(text = "데이터 처리 중...") {
+            const spinner = document.getElementById('loading-spinner');
+            const spinnerText = document.getElementById('loading-spinner-text');
+            if (spinner) {
+                if (spinnerText) spinnerText.innerText = text;
+                spinner.style.display = "flex";
+            }
+        }
+        function hideSpinner() {
+            const spinner = document.getElementById('loading-spinner');
+            if (spinner) spinner.style.display = "none";
+        }
+
+        // 글로벌 메모리 데이터베이스 캐시 객체
+        let db = {
+            students: [],
+            jobs: [],
+            transactions: [],
+            savings: [],
+            shop: [],
+            pendingPayments: [],
+            useRequests: [],
+            shopPurchaseLog: [],
+            tax: { totalTax: 120 },
+            taxTransactions: [],
+            taxGoals: [],
+            deductReasons: {},
+            inventory: [],
+            envReports: [],
+            newsFlash: null,
+            salaryHistories: {},
+            policies: {
+                freeRate: 2.0,
+                savingRate: 10.0,
+                savingTerm: 3,
+                approvalLimit: 150,
+                minSavingAmount: 10,
+                currencyName: "치킨",
+                currencyIcon: null,
+                dailyPurchaseLimit: 5
+            },
+            envSettings: {
+                plateReward: 5,
+                handkerchiefReward: 3
+            },
+            envActivityTypes: [
+                { id: "act_1", name: "분리수거", reward: 20 },
+                { id: "act_2", name: "교실 청소", reward: 30 },
+                { id: "act_3", name: "에너지 절약", reward: 10 },
+                { id: "act_4", name: "기타", reward: 15 }
+            ],
+            monthlyAttendance: [],
+            systemSettings: {
+                logoImage: null,
+                shopActive: true,
+                bankActive: true,
+                envExchangeActive: true,
+                envExampleText: "예시: 급식판을 깨끗이 비우고 사진을 찍어 올려주세요!",
+                envExampleImage: null,
+                shopHours: "평일 09:00 ~ 16:00",
+                shopNotice: "주의: 상품 구매 후 취소 및 환불은 선생님께 직접 요청해야 합니다."
+            }
+        };
+
+        function getDB() {
+            return db;
+        }
+
+        function saveDB(newDb) {
+            db = newDb;
+        }
+
+        // Firestore 실시간 스냅샷 바인딩 함수
+        function initFirestoreListeners() {
+            const onError = (colName, err) => {
+                console.error(`Firestore onSnapshot error in collection [${colName}]:`, err);
+                alert(`데이터베이스 실시간 로드에 실패했습니다. [컬렉션: ${colName}] (에러: ${err.message})`);
+            };
+
+            // 1. users 컬렉션
+            fs.collection("users").onSnapshot(snapshot => {
+                const students = [];
+                snapshot.forEach(doc => {
+                    students.push(doc.data());
+                });
+                db.students = students.filter(s => s.id !== "teacher");
+                initialLoadState.users = true;
+                onDBChange("users");
+                checkAllLoaded();
+            }, err => onError("users", err));
+            
+            // 2. jobs 컬렉션
+            fs.collection("jobs").onSnapshot(snapshot => {
+                const jobs = [];
+                snapshot.forEach(doc => {
+                    jobs.push(doc.data());
+                });
+                db.jobs = jobs;
+                initialLoadState.jobs = true;
+                onDBChange("jobs");
+                checkAllLoaded();
+            }, err => onError("jobs", err));
+            
+            // 3. transactions 컬렉션
+            fs.collection("transactions").onSnapshot(snapshot => {
+                const txs = [];
+                snapshot.forEach(doc => {
+                    txs.push(doc.data());
+                });
+                db.transactions = txs;
+                initialLoadState.transactions = true;
+                onDBChange("transactions");
+                checkAllLoaded();
+            }, err => onError("transactions", err));
+            
+            // 4. shop_items 컬렉션
+            fs.collection("shop_items").onSnapshot(snapshot => {
+                const items = [];
+                snapshot.forEach(doc => {
+                    items.push(doc.data());
+                });
+                db.shop = items;
+                initialLoadState.shop = true;
+                onDBChange("shop_items");
+                checkAllLoaded();
+            }, err => onError("shop_items", err));
+            
+            // 5. shop_orders 컬렉션
+            fs.collection("shop_orders").onSnapshot(snapshot => {
+                const orders = [];
+                snapshot.forEach(doc => {
+                    orders.push(doc.data());
+                });
+                db.pendingPayments = orders.filter(o => o.type === "purchase_request");
+                db.useRequests = orders.filter(o => o.type === "use_request");
+                db.shopPurchaseLog = orders.filter(o => o.type === "completed_purchase" || o.type === "completed_use");
+                initialLoadState.shop_orders = true;
+                onDBChange("shop_orders");
+                checkAllLoaded();
+            }, err => onError("shop_orders", err));
+            
+            // 6. env_reports 컬렉션
+            fs.collection("env_reports").onSnapshot(snapshot => {
+                const reports = [];
+                snapshot.forEach(doc => {
+                    reports.push(doc.data());
+                });
+                db.envReports = reports;
+                initialLoadState.env_reports = true;
+                onDBChange("env_reports");
+                checkAllLoaded();
+            }, err => onError("env_reports", err));
+            
+            // 7. env_attendance 컬렉션
+            fs.collection("env_attendance").onSnapshot(snapshot => {
+                const atts = [];
+                snapshot.forEach(doc => {
+                    atts.push(doc.data());
+                });
+                db.monthlyAttendance = atts;
+                initialLoadState.env_attendance = true;
+                onDBChange("env_attendance");
+                checkAllLoaded();
+            }, err => onError("env_attendance", err));
+            
+            // 8. bank_savings 컬렉션
+            fs.collection("bank_savings").onSnapshot(snapshot => {
+                const savings = [];
+                snapshot.forEach(doc => {
+                    savings.push(doc.data());
+                });
+                db.savings = savings;
+                initialLoadState.bank_savings = true;
+                onDBChange("bank_savings");
+                checkAllLoaded();
+            }, err => onError("bank_savings", err));
+            
+            // 9. tax 컬렉션의 state 문서
+            fs.collection("tax").doc("state").onSnapshot(doc => {
+                if (doc.exists) {
+                    db.tax = doc.data();
+                } else {
+                    db.tax = { totalTax: 120 };
+                }
+                initialLoadState.tax = true;
+                onDBChange("tax");
+                checkAllLoaded();
+            }, err => onError("tax", err));
+            
+            // 10. tax_transactions 컬렉션
+            fs.collection("tax_transactions").onSnapshot(snapshot => {
+                const txs = [];
+                snapshot.forEach(doc => {
+                    txs.push(doc.data());
+                });
+                db.taxTransactions = txs;
+                initialLoadState.tax_transactions = true;
+                onDBChange("tax_transactions");
+                checkAllLoaded();
+            }, err => onError("tax_transactions", err));
+            
+            // 11. tax_goals 컬렉션
+            fs.collection("tax_goals").onSnapshot(snapshot => {
+                const goals = [];
+                snapshot.forEach(doc => {
+                    goals.push(doc.data());
+                });
+                db.taxGoals = goals;
+                initialLoadState.tax_goals = true;
+                onDBChange("tax_goals");
+                checkAllLoaded();
+            }, err => onError("tax_goals", err));
+            
+            // 12. settings 컬렉션의 system 문서
+            fs.collection("settings").doc("system").onSnapshot(doc => {
+                if (doc.exists) {
+                    const data = doc.data();
+                    db.systemSettings = {
+                        logoImage: data.logoImage,
+                        shopActive: data.shopActive,
+                        bankActive: data.bankActive,
+                        envExchangeActive: data.envExchangeActive,
+                        envExampleText: data.envExampleText,
+                        envExampleImage: data.envExampleImage,
+                        shopHours: data.shopHours,
+                        shopNotice: data.shopNotice
+                    };
+                    db.policies = {
+                        freeRate: data.freeRate || 2.0,
+                        savingRate: data.savingRate || 10.0,
+                        savingTerm: data.savingTerm || 3,
+                        approvalLimit: data.approvalLimit || 150,
+                        minSavingAmount: data.minSavingAmount || 10,
+                        currencyName: data.currencyName || "치킨",
+                        currencyIcon: data.currencyIcon || null,
+                        dailyPurchaseLimit: data.dailyPurchaseLimit || 5
+                    };
+                    db.envSettings = data.envSettings || { plateReward: 5, handkerchiefReward: 3 };
+                }
+                initialLoadState.settings = true;
+                onDBChange("settings");
+                checkAllLoaded();
+            }, err => onError("settings", err));
+
+            // 13. env_mileage_ledger 컬렉션
+            fs.collection("env_mileage_ledger").onSnapshot(snapshot => {
+                const ledgers = [];
+                snapshot.forEach(doc => {
+                    ledgers.push(doc.data());
+                });
+                db.envMileageLedger = ledgers;
+                initialLoadState.env_mileage_ledger = true;
+                onDBChange("env_mileage_ledger");
+                checkAllLoaded();
+            }, err => onError("env_mileage_ledger", err));
+
+            // 14. inventory 컬렉션
+            fs.collection("inventory").onSnapshot(snapshot => {
+                const invs = [];
+                snapshot.forEach(doc => {
+                    invs.push(doc.data());
+                });
+                db.inventory = invs;
+                initialLoadState.inventory = true;
+                onDBChange("inventory");
+                checkAllLoaded();
+            }, err => onError("inventory", err));
+        }
+
+        function onDBChange(source) {
+            updateLogo();
+            updateCurrencyUnits();
+            if (currentUser) {
+                loadTabData(activeTab);
+            }
+        }
+
+        // 최초 로컬 데이터 마이그레이션 함수
+        async function checkAndMigrateLocalStorageToFirestore() {
+            const systemDoc = await fs.collection("settings").doc("system").get();
+            if (!systemDoc.exists) {
+                const localDataStr = localStorage.getItem('class_bank_db');
+                if (localDataStr) {
+                    try {
+                        showSpinner("로컬 데이터를 클라우드로 마이그레이션하는 중...");
+                        const localDB = JSON.parse(localDataStr);
+                        
+                        await fs.collection("settings").doc("system").set({
+                            bankName: localDB.systemSettings.bankName || "양반후반 학급 은행",
+                            logoImage: localDB.systemSettings.logoImage || null,
+                            shopActive: localDB.systemSettings.shopActive !== false,
+                            bankActive: localDB.systemSettings.bankActive !== false,
+                            envExchangeActive: localDB.systemSettings.envExchangeActive !== false,
+                            envExampleText: localDB.systemSettings.envExampleText || "예시...",
+                            envExampleImage: localDB.systemSettings.envExampleImage || null,
+                            shopHours: localDB.systemSettings.shopHours || "평일 09:00 ~ 16:00",
+                            shopNotice: localDB.systemSettings.shopNotice || "주의...",
+                            freeRate: localDB.policies.freeRate || 2.0,
+                            savingRate: localDB.policies.savingRate || 10.0,
+                            savingTerm: localDB.policies.savingTerm || 3,
+                            approvalLimit: localDB.policies.approvalLimit || 150,
+                            minSavingAmount: localDB.policies.minSavingAmount || 10,
+                            currencyName: localDB.policies.currencyName || "치킨",
+                            currencyIcon: localDB.policies.currencyIcon || null,
+                            dailyPurchaseLimit: localDB.policies.dailyPurchaseLimit || 5,
+                            envSettings: localDB.envSettings || { plateReward: 5, handkerchiefReward: 3 }
+                        });
+                        
+                        for (const student of localDB.students) {
+                            await fs.collection("users").doc(student.id).set(student);
+                        }
+                        
+                        await fs.collection("users").doc("teacher").set({
+                            id: "teacher",
+                            name: "선생님",
+                            password: "1234",
+                            role: "teacher"
+                        });
+                        
+                        for (const job of localDB.jobs) {
+                            await fs.collection("jobs").doc(job.name).set(job);
+                        }
+                        
+                        for (const tx of localDB.transactions) {
+                            const txId = tx.id || "tx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                            await fs.collection("transactions").doc(txId).set({ ...tx, id: txId });
+                        }
+                        
+                        for (const item of localDB.shop) {
+                            await fs.collection("shop_items").doc(item.id).set(item);
+                        }
+                        
+                        await fs.collection("tax").doc("state").set(localDB.tax || { totalTax: 120 });
+                        
+                        if (localDB.taxTransactions) {
+                            for (const ttx of localDB.taxTransactions) {
+                                const ttxId = ttx.id || "ttx_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                                await fs.collection("tax_transactions").doc(ttxId).set({ ...ttx, id: ttxId });
+                            }
+                        }
+                        
+                        for (const goal of localDB.taxGoals) {
+                            await fs.collection("tax_goals").doc(goal.id).set(goal);
+                        }
+                        
+                        if (localDB.envReports) {
+                            for (const rep of localDB.envReports) {
+                                const repId = rep.id || "rep_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                                await fs.collection("env_reports").doc(repId).set({ ...rep, id: repId });
+                            }
+                        }
+                        
+                        if (localDB.monthlyAttendance) {
+                            for (const att of localDB.monthlyAttendance) {
+                                const attId = att.date || "att_" + Date.now();
+                                await fs.collection("env_attendance").doc(attId).set(att);
+                            }
+                        }
+                        
+                        if (localDB.savings) {
+                            for (const sav of localDB.savings) {
+                                const savId = sav.id || "sav_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                                await fs.collection("bank_savings").doc(savId).set({ ...sav, id: savId });
+                            }
+                        }
+
+                        if (localDB.envMileageLedger) {
+                            for (const eml of localDB.envMileageLedger) {
+                                const emlId = eml.id || "eml_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                                await fs.collection("env_mileage_ledger").doc(emlId).set({ ...eml, id: emlId });
+                            }
+                        }
+
+                        if (localDB.inventory) {
+                            for (const inv of localDB.inventory) {
+                                const invId = inv.id || "inv_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                                await fs.collection("inventory").doc(invId).set({ ...inv, id: invId });
+                            }
+                        }
+                        
+                        showToast("🎉 로컬 데이터를 성공적으로 클라우드 DB로 이식했습니다!", "success");
+                    } catch (err) {
+                        console.error("이식 오류: ", err);
+                        showToast("데이터 이식 중 에러 발생", "danger");
+                    } finally {
+                        hideSpinner();
+                    }
+                }
+            }
+        }
+
         // --- 실시간 SVG 기반 아바타 HTML 생성기 ---
         function generateAvatarHTML(avatar) {
             if (!avatar) avatar = { emoji: "👶", bgColor: "#ffe3e3" };
@@ -28,240 +441,6 @@
                 avatar = { emoji: "👶", bgColor: "#ffe3e3" };
             }
             return `<div style="background-color: ${avatar.bgColor}; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; border-radius: 50%; user-select: none;">${avatar.emoji}</div>`;
-        }
-
-        // ==========================================
-        // 1. MOCK DATABASE INITIALIZATION (LocalStorage)
-        // ==========================================
-        const INITIAL_STUDENTS = [
-            { id: "student1", name: "김민우", password: "1234", balance: 500, isFrozen: false, job: "반장", mileage: 0, mileageBalance: 0, avatar: { emoji: "👶", bgColor: "#ffe3e3" } },
-            { id: "student2", name: "이지아", password: "1234", balance: 80, isFrozen: false, job: "청소 당번", mileage: 0, mileageBalance: 0, avatar: { emoji: "👧", bgColor: "#d0ebff" } },
-            { id: "student3", name: "박준영", password: "1234", balance: 1200, isFrozen: false, job: "식사 도우미", mileage: 0, mileageBalance: 0, avatar: { emoji: "👦", bgColor: "#e2f9e1" } }
-        ];
-
-        const INITIAL_JOBS = [
-            { name: "반장", baseSalary: 300 },
-            { name: "청소 당번", baseSalary: 200 },
-            { name: "식사 도우미", baseSalary: 220 },
-            { name: "무직", baseSalary: 50 }
-        ];
-
-        const INITIAL_SHOP_ITEMS = [
-            { id: "p1", name: "1일 모둠원 변경권", category: "coupon", price: 100, basePrice: 100, weeklyGoal: 3, purchaseCount: 0, emoji: "🎫", description: "원하는 모둠원으로 하루 동안 함께 공부할 수 있는 권한입니다." },
-            { id: "p2", name: "급식 1등 식사권", category: "coupon", price: 200, basePrice: 200, weeklyGoal: 2, purchaseCount: 0, emoji: "🍚", description: "줄을 서지 않고 급식을 가장 먼저 받을 수 있는 티켓입니다." },
-            { id: "p3", name: "뿌링클 닭다리 스낵", category: "snack", price: 50, basePrice: 50, weeklyGoal: 5, purchaseCount: 0, emoji: "🍗", description: "바삭하고 달콤 짭조름한 대표 인기 닭다리 과자입니다." },
-            { id: "p4", name: "치킨팝 믹스 팩", category: "snack", price: 80, basePrice: 80, weeklyGoal: 4, purchaseCount: 0, emoji: "🍿", description: "한 입에 쏙 들어가는 치킨팝 과자 패키지입니다." },
-            { id: "p5", name: "자율 자유시간 10분권", category: "coupon", price: 300, basePrice: 300, weeklyGoal: 1, purchaseCount: 0, emoji: "⏳", description: "자유시간 10분을 확보하여 개인 학습이나 휴식을 취할 수 있습니다." }
-        ];
-
-        const INITIAL_TAX_GOALS = [
-            { id: "g1", description: "학급 치킨 파티 🍗", targetAmount: 1000, current: 0 },
-            { id: "g2", description: "학급 보드게임 3종 세트 구매 🎲", targetAmount: 2500, current: 0 },
-            { id: "g3", description: "금요일 영화 관람 및 팝콘 데이 🎬", targetAmount: 5000, current: 0 }
-        ];
-
-        function getDB() {
-            let db = null;
-            if (!localStorage.getItem('class_bank_db')) {
-                db = {
-                    students: INITIAL_STUDENTS,
-                    jobs: INITIAL_JOBS,
-                    transactions: [
-                        { id: "t_init1", studentId: "student1", date: new Date().toISOString(), description: "초기 자금 지원", type: "deposit", amount: 500, balanceAfter: 500, isSavingsMaturity: false },
-                        { id: "t_init2", studentId: "student2", date: new Date().toISOString(), description: "초기 자금 지원", type: "deposit", amount: 80, balanceAfter: 80, isSavingsMaturity: false },
-                        { id: "t_init3", studentId: "student3", date: new Date().toISOString(), description: "초기 자금 지원", type: "deposit", amount: 1200, balanceAfter: 1200, isSavingsMaturity: false }
-                    ],
-                    savings: [],
-                    shop: INITIAL_SHOP_ITEMS,
-                    pendingPayments: [],
-                    tax: { totalTax: 120 }, // 세금 누적액
-                    taxTransactions: [
-                        { id: "tax_init", date: new Date().toISOString(), type: "deposit", amount: 120, description: "학급 세금 최초 적립" }
-                    ],
-                    taxGoals: INITIAL_TAX_GOALS,
-                    deductReasons: {},
-                    inventory: [],
-                    envReports: [],
-                    newsFlash: null,
-                    salaryHistories: {}, // { studentId: salaryHistoryObject }
-                    policies: {
-                        freeRate: 2.0,
-                        savingRate: 10.0,
-                        savingTerm: 3, // 개월 단위
-                        approvalLimit: 150
-                    },
-                    envSettings: {
-                        plateReward: 5,
-                        handkerchiefReward: 3
-                    },
-                    envActivityTypes: [
-                        { id: "act_1", name: "분리수거", reward: 20 },
-                        { id: "act_2", name: "교실 청소", reward: 30 },
-                        { id: "act_3", name: "에너지 절약", reward: 10 },
-                        { id: "act_4", name: "기타", reward: 15 }
-                    ],
-                    monthlyAttendance: [],
-                    systemSettings: {
-                        logoImage: null,
-                        shopActive: true,
-                        bankActive: true,
-                        envExchangeActive: true,
-                        envExampleText: "예시: 급식판을 깨끗이 비우고 사진을 찍어 올려주세요!",
-                        envExampleImage: null,
-                        shopHours: "평일 09:00 ~ 16:00",
-                        shopNotice: "주의: 상품 구매 후 취소 및 환불은 선생님께 직접 요청해야 합니다."
-                    }
-                };
-                localStorage.setItem('class_bank_db', JSON.stringify(db));
-            } else {
-                db = JSON.parse(localStorage.getItem('class_bank_db'));
-            }
-
-            // 스키마 보정 로직
-            let updated = false;
-            if (!db.envActivityTypes) {
-                db.envActivityTypes = [
-                    { id: "act_1", name: "분리수거", reward: 20 },
-                    { id: "act_2", name: "교실 청소", reward: 30 },
-                    { id: "act_3", name: "에너지 절약", reward: 10 },
-                    { id: "act_4", name: "기타", reward: 15 }
-                ];
-                updated = true;
-            }
-            if (!db.systemSettings) {
-                db.systemSettings = {
-                    logoImage: null,
-                    shopActive: true,
-                    bankActive: true,
-                    envExchangeActive: true,
-                    envExampleText: "예시: 급식판을 깨끗이 비우고 사진을 찍어 올려주세요!",
-                    envExampleImage: null,
-                    shopHours: "평일 09:00 ~ 16:00",
-                    shopNotice: "주의: 상품 구매 후 취소 및 환불은 선생님께 직접 요청해야 합니다."
-                };
-                updated = true;
-            }
-            if (db.systemSettings.shopActive === undefined) { db.systemSettings.shopActive = true; updated = true; }
-            if (db.systemSettings.bankActive === undefined) { db.systemSettings.bankActive = true; updated = true; }
-            if (db.systemSettings.envExchangeActive === undefined) { db.systemSettings.envExchangeActive = true; updated = true; }
-            if (db.systemSettings.envExampleText === undefined) { db.systemSettings.envExampleText = "예시: 급식판을 깨끗이 비우고 사진을 찍어 올려주세요!"; updated = true; }
-            if (db.systemSettings.shopHours === undefined) { db.systemSettings.shopHours = "평일 09:00 ~ 16:00"; updated = true; }
-            if (db.systemSettings.shopNotice === undefined) { db.systemSettings.shopNotice = "주의: 상품 구매 후 취소 및 환불은 선생님께 직접 요청해야 합니다."; updated = true; }
-
-            if (!db.envSettings) {
-                db.envSettings = { plateReward: 5, handkerchiefReward: 3 };
-                updated = true;
-            }
-            if (!db.monthlyAttendance) {
-                db.monthlyAttendance = [];
-                updated = true;
-            }
-            if (!db.policies) {
-                db.policies = { freeRate: 2.0, savingRate: 10.0, savingTerm: 3, approvalLimit: 150 };
-                updated = true;
-            }
-            if (db.policies.approvalLimit === undefined) {
-                db.policies.approvalLimit = 150;
-                updated = true;
-            }
-            if (db.policies.dailyPurchaseLimit === undefined) {
-                db.policies.dailyPurchaseLimit = 5;
-                updated = true;
-            }
-            
-            db.students.forEach(st => {
-                if (st.role === undefined) {
-                    st.role = "";
-                    updated = true;
-                }
-                if (st.baseSalary === undefined) {
-                    const jobObj = db.jobs.find(j => j.name === (st.job || "무직"));
-                    st.baseSalary = jobObj ? jobObj.baseSalary : 50;
-                    updated = true;
-                }
-                if (st.mileage === undefined) {
-                    st.mileage = 0;
-                    updated = true;
-                }
-                if (st.mileageBalance === undefined) {
-                    st.mileageBalance = st.mileage || 0;
-                    updated = true;
-                }
-                if (st.avatar === undefined || !st.avatar.emoji) {
-                    st.avatar = { emoji: "👶", bgColor: "#ffe3e3" };
-                    updated = true;
-                }
-                if (st.isHandkerchiefManager === undefined) {
-                    st.isHandkerchiefManager = false;
-                    updated = true;
-                }
-                if (st.isMealManager === undefined) {
-                    st.isMealManager = false;
-                    updated = true;
-                }
-                if (st.approvedArchive === undefined) {
-                    st.approvedArchive = [];
-                    updated = true;
-                }
-            });
-
-            if (!db.salaryHistories) {
-                db.salaryHistories = {};
-                updated = true;
-            }
-            for (let studentId in db.salaryHistories) {
-                if (db.salaryHistories[studentId] && !Array.isArray(db.salaryHistories[studentId])) {
-                    db.salaryHistories[studentId] = [db.salaryHistories[studentId]];
-                    updated = true;
-                }
-            }
-
-            if (db.shop) {
-                db.shop.forEach(item => {
-                    if (item.emoji === undefined) {
-                        if (item.category === 'coupon') {
-                            item.emoji = "🎫";
-                        } else {
-                            item.emoji = "🍪";
-                        }
-                        updated = true;
-                    }
-                    if (item.weeklyGoal === undefined) {
-                        item.weeklyGoal = 3;
-                        updated = true;
-                    }
-                    if (item.description === undefined) {
-                        item.description = "상세 설명이 비어있습니다.";
-                        updated = true;
-                    }
-                });
-            }
-
-            if (!db.useRequests) {
-                db.useRequests = [];
-                updated = true;
-            }
-            if (db.policies.minSavingAmount === undefined) {
-                db.policies.minSavingAmount = 10;
-                updated = true;
-            }
-            if (db.policies.currencyName === undefined) {
-                db.policies.currencyName = "치킨";
-                updated = true;
-            }
-            if (db.policies.currencyIcon === undefined) {
-                db.policies.currencyIcon = (db.systemSettings && db.systemSettings.currencyIcon) ? db.systemSettings.currencyIcon : null;
-                updated = true;
-            }
-
-            if (updated) {
-                localStorage.setItem('class_bank_db', JSON.stringify(db));
-            }
-            return db;
-        }
-
-        function saveDB(db) {
-            localStorage.setItem('class_bank_db', JSON.stringify(db));
         }
 
         // ==========================================
@@ -586,10 +765,114 @@
         let tempCSVData = []; // CSV 업로드용 임시 공간
         let editingOriginalJobName = null; // 직업 수정용 임시 공간
 
-        window.addEventListener('DOMContentLoaded', () => {
-            updateLogo();
-            updateCurrencyUnits();
+        let isInitialLoadComplete = false;
+        const initialLoadState = {
+            users: false,
+            jobs: false,
+            transactions: false,
+            shop: false,
+            shop_orders: false,
+            env_reports: false,
+            env_attendance: false,
+            bank_savings: false,
+            tax: false,
+            tax_transactions: false,
+            tax_goals: false,
+            settings: false,
+            env_mileage_ledger: false,
+            inventory: false
+        };
+
+        function checkAllLoaded() {
+            if (isInitialLoadComplete) return;
+            const allLoaded = Object.values(initialLoadState).every(loaded => loaded);
+            if (allLoaded) {
+                isInitialLoadComplete = true;
+                onInitialLoadSuccess();
+            }
+        }
+
+        async function onInitialLoadSuccess() {
+            try {
+                await checkAndMigrateLocalStorageToFirestore();
+            } catch (err) {
+                console.error("데이터베이스 마이그레이션 실패: ", err);
+                alert("데이터베이스 마이그레이션에 실패했습니다. (에러: " + err.message + ")");
+            }
             checkAutoLogin();
+            hideSpinner();
+        }
+
+        async function handleLogin() {
+            const id = document.getElementById('login-id').value.trim();
+            const pw = document.getElementById('login-pw').value.trim();
+
+            if (!id || !pw) {
+                showToast("아이디와 비밀번호를 입력해 주세요.", "danger");
+                return;
+            }
+
+            const loginBtn = document.getElementById('btn-login');
+            if (loginBtn) {
+                loginBtn.disabled = true;
+                loginBtn.innerText = "로그인 중...";
+            }
+            showSpinner("로그인 검증 중...");
+
+            try {
+                if (id === "teacher") {
+                    if (pw === "1234") {
+                        localStorage.setItem('class_bank_auth_token', 'teacher');
+                        setCurrentUser("teacher", "선생님", "teacher");
+                        switchTab("salary");
+                        showToast("🎉 교사용 관리 권한으로 접속했습니다.", "success");
+                    } else {
+                        alert("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.");
+                        showToast("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "danger");
+                    }
+                    return;
+                }
+
+                // Firestore users 컬렉션에서 검증
+                const userDoc = await fs.collection("users").doc(id).get();
+                if (userDoc.exists) {
+                    const student = userDoc.data();
+                    if (student.password === pw) {
+                        if (student.isFrozen) {
+                            showFreezeScreen();
+                            return;
+                        }
+
+                        localStorage.setItem('class_bank_auth_token', student.id);
+                        setCurrentUser(student.id, student.name, "student");
+                        switchTab("salary");
+                        showToast(`🎈 환영합니다, ${student.name} 학생!`, "success");
+                    } else {
+                        alert("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.");
+                        showToast("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "danger");
+                    }
+                } else {
+                    alert("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.");
+                    showToast("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "danger");
+                }
+            } catch (err) {
+                console.error("로그인 에러: ", err);
+                alert("데이터베이스 조회에 실패했습니다. (에러: " + err.message + ")");
+                showToast("통신 오류가 발생했습니다.", "danger");
+            } finally {
+                hideSpinner();
+                if (loginBtn) {
+                    loginBtn.disabled = false;
+                    loginBtn.innerText = "로그인";
+                }
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            showSpinner("클라우드 데이터베이스에서 데이터를 실시간으로 가져오는 중입니다...");
+            
+            // Firestore 리스너 가동
+            initFirestoreListeners();
             
             // 실시간 적금 시간 갱신 및 이자 정산 타이머 가동 (1초 간격)
             setInterval(updateSavingsTimeRemaining, 1000);
@@ -600,7 +883,7 @@
         });
 
         function checkAutoLogin() {
-            const token = sessionStorage.getItem('auth_token');
+            const token = localStorage.getItem('class_bank_auth_token');
             if (token) {
                 const db = getDB();
                 const student = db.students.find(s => s.id === token);
@@ -623,55 +906,8 @@
             switchTab("login");
         }
 
-        function handleLogin() {
-            const id = document.getElementById('login-id').value.trim();
-            const pw = document.getElementById('login-pw').value.trim();
-
-            if (!id || !pw) {
-                showToast("아이디와 비밀번호를 입력해 주세요.", "danger");
-                return;
-            }
-
-            const db = getDB();
-
-            if (id === "teacher") {
-                if (pw === "1234") {
-                    sessionStorage.setItem('auth_token', 'teacher');
-                    setCurrentUser("teacher", "선생님", "teacher");
-                    switchTab("salary");
-                    showToast("🎉 교사용 관리 권한으로 접속했습니다.", "success");
-                } else {
-                    alert("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.");
-                    showToast("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "danger");
-                }
-                return;
-            }
-
-            const studentIndex = db.students.findIndex(s => s.id === id);
-            if (studentIndex > -1) {
-                const student = db.students[studentIndex];
-                if (student.password === pw) {
-                    if (student.isFrozen) {
-                        showFreezeScreen();
-                        return;
-                    }
-
-                    sessionStorage.setItem('auth_token', student.id);
-                    setCurrentUser(student.id, student.name, "student");
-                    switchTab("salary");
-                    showToast(`🎈 환영합니다, ${student.name} 학생!`, "success");
-                } else {
-                    alert("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.");
-                    showToast("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "danger");
-                }
-            } else {
-                alert("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.");
-                showToast("🚫 아이디 또는 비밀번호가 올바르지 않습니다. 다시 확인해 주세요.", "danger");
-            }
-        }
-
         function logout() {
-            sessionStorage.removeItem('auth_token');
+            localStorage.removeItem('class_bank_auth_token');
             currentUser = null;
             document.getElementById('logged-user-widget').style.display = "none";
             document.getElementById('main-navigation').style.display = "none";
@@ -1308,9 +1544,11 @@
                         <td><span class="role-badge" style="background:#ffc078; color:var(--text-main); font-size:0.75rem; font-weight:bold;">${student.job || '무직'}</span></td>
                         <td style="font-weight:bold; color:#d9480f;">${(student.balance || 0).toLocaleString()} ${getCurrencyName()}</td>
                         <td>
-                            <div style="display:flex; align-items:center; gap:8px;">
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                                 <button class="btn btn-primary" style="font-size:0.75rem; padding:4px 8px;" onclick="handleViewStudentDetail('${student.id}')">🔍 상세조회 & 롤백</button>
-                                <button class="btn btn-warning" style="font-size:0.75rem; padding:4px 8px; margin-left: 4px;" onclick="handleResetStudentPassword('${student.id}')">🔑 비번초기화</button>
+                                <button class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" onclick="openTeacherStudentEditModal('${student.id}')">✏️ 수정</button>
+                                <button class="btn btn-danger" style="font-size:0.75rem; padding:4px 8px;" onclick="handleTeacherStudentDelete('${student.id}')">❌ 삭제</button>
+                                <button class="btn btn-warning" style="font-size:0.75rem; padding:4px 8px;" onclick="handleResetStudentPassword('${student.id}')">🔑 비번초기화</button>
                                 <label class="switch">
                                     <input type="checkbox" ${isChecked} onchange="toggleStudentFreeze('${student.id}', this.checked)">
                                     <span class="slider"></span>
@@ -1741,8 +1979,8 @@
             }
         }
 
-        // 월급 수동 지급 실행
-        function handlePaySalarySubmit() {
+        // 월급 수동 지급 실행 (비동기 Firestore 연동)
+        async function handlePaySalarySubmit() {
             const target = document.getElementById('salary-target-student').value;
             const base = parseInt(document.getElementById('salary-base-input').value) || 0;
             const incomeTax = parseInt(document.getElementById('salary-tax-input').value) || 0;
@@ -1759,153 +1997,186 @@
                 return;
             }
 
-            const db = getDB();
+            const payBtn = document.getElementById('btn-pay-salary');
+            if (payBtn) {
+                payBtn.disabled = true;
+                payBtn.innerText = "지급 처리 중...";
+            }
+            showSpinner("급여 정산 및 지급 이식 중...");
 
-            if (target === "all") {
-                let totalTaxCollected = 0;
-                let activeStudentsCount = 0;
-
-                db.students.forEach(st => {
-                    if (st.isFrozen) return;
-                    
-                    const jobName = st.job || "무직";
-                    const jobObj = db.jobs.find(j => j.name === jobName);
-                    const stBase = st.baseSalary !== undefined ? st.baseSalary : (jobObj ? jobObj.baseSalary : 50);
-                    const stTax = Math.round(stBase * 0.1);
-                    
-                    const stNet = stBase - (stTax + health + electric + meals + rent + deduct) + bonus;
-                    const stDeductSum = stTax + health + electric + meals + rent + deduct;
-
-                    st.balance += stNet;
-                    totalTaxCollected += stTax;
-                    activeStudentsCount++;
-
-                    const txId = "tx_sal_" + Date.now() + "_" + st.id;
-
-                    // 개인 거래내역 추가
-                    db.transactions.push({
-                        id: txId,
-                        studentId: st.id,
-                        date: new Date().toISOString(),
-                        description: `💼 정기 학급 월급 지급 (실수령액: ${stNet} 치킨)`,
-                        type: "deposit",
-                        amount: stNet,
-                        balanceAfter: st.balance,
-                        isSavingsMaturity: false
-                    });
-
-                    const historyId = "sal_hist_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
-
-                    // 개인 월급명세서 히스토리 추가
-                    if (!db.salaryHistories[st.id]) {
-                        db.salaryHistories[st.id] = [];
-                    }
-                    db.salaryHistories[st.id].push({
-                        id: historyId,
-                        txId: txId,
-                        date: new Date().toISOString(),
-                        base: stBase,
-                        allowances: [
-                            { name: "기본급", amount: stBase },
-                            { name: "추가 수당(보너스)", amount: bonus }
-                        ],
-                        deductions: [
-                            { name: "소득세 (10%)", amount: stTax },
-                            { name: "건강보험료", amount: health },
-                            { name: "공동 전기세", amount: electric },
-                            { name: "학교 급식비", amount: meals },
-                            { name: "책상 자리 임대료", amount: rent },
-                            { name: "지각/행동 삭감액", amount: deduct }
-                        ],
-                        comment: comment || "이번 달도 학급을 위해 성실하게 수고해 주어 고맙습니다!",
-                        netSalary: stNet
-                    });
-                });
-
-                if (activeStudentsCount > 0) {
-                    db.tax.totalTax += totalTaxCollected;
-                    db.taxTransactions.push({
-                        id: "tax_sal_" + Date.now(),
-                        date: new Date().toISOString(),
-                        type: "deposit",
-                        amount: totalTaxCollected,
-                        description: `월급 공제 세입 적립 (학급 전체 ${activeStudentsCount}명 일괄 공제 세금)`
-                    });
-                }
+            try {
+                const db = getDB();
+                const batch = fs.batch();
                 
-                showToast("📢 학급 전체 학생들에게 개별 직업 급여를 반영한 월급 지급 및 명세가 발행되었습니다.", "success");
-            } else {
-                const st = db.students.find(s => s.id === target);
-                if (st) {
-                    if (st.isFrozen) {
-                        showToast("동결 상태인 학생에게는 월급을 지급할 수 없습니다.", "danger");
-                        return;
-                    }
-                    const netSalary = base - (incomeTax + health + electric + meals + rent + deduct) + bonus;
-                    const totalDeductions = incomeTax + health + electric + meals + rent + deduct;
+                if (target === "all") {
+                    let totalTaxCollected = 0;
+                    let activeStudentsCount = 0;
 
-                    st.balance += netSalary;
-                    
-                    const txId = "tx_sal_" + Date.now() + "_" + st.id;
+                    for (const st of db.students) {
+                        if (st.isFrozen) return;
+                        
+                        const jobName = st.job || "무직";
+                        const jobObj = db.jobs.find(j => j.name === jobName);
+                        const stBase = st.baseSalary !== undefined ? st.baseSalary : (jobObj ? jobObj.baseSalary : 50);
+                        const stTax = Math.round(stBase * 0.1);
+                        
+                        const stNet = stBase - (stTax + health + electric + meals + rent + deduct) + bonus;
+                        
+                        // 학생 잔고 및 명세서 누적
+                        const newBalance = (st.balance || 0) + stNet;
+                        totalTaxCollected += stTax;
+                        activeStudentsCount++;
 
-                    db.transactions.push({
-                        id: txId,
-                        studentId: st.id,
-                        date: new Date().toISOString(),
-                        description: `💼 개별 월급 지급 (실수령액: ${netSalary} 치킨)`,
-                        type: "deposit",
-                        amount: netSalary,
-                        balanceAfter: st.balance,
-                        isSavingsMaturity: false
-                    });
-
-                    const historyId = "sal_hist_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
-
-                    if (!db.salaryHistories[st.id]) {
-                        db.salaryHistories[st.id] = [];
-                    }
-                    db.salaryHistories[st.id].push({
-                        id: historyId,
-                        txId: txId,
-                        date: new Date().toISOString(),
-                        base: base,
-                        allowances: [
-                            { name: "기본급", amount: base },
-                            { name: "추가 수당(보너스)", amount: bonus }
-                        ],
-                        deductions: [
-                            { name: "소득세 (10%)", amount: incomeTax },
-                            { name: "건강보험료", amount: health },
-                            { name: "공동 전기세", amount: electric },
-                            { name: "학교 급식비", amount: meals },
-                            { name: "책상 자리 임대료", amount: rent },
-                            { name: "지각/행동 삭감액", amount: deduct }
-                        ],
-                        comment: comment || "이번 달도 학급을 위해 성실하게 수고해 주어 고맙습니다!",
-                        netSalary: netSalary
-                    });
-
-                    if (incomeTax > 0) {
-                        db.tax.totalTax += incomeTax;
-                        db.taxTransactions.push({
-                            id: "tax_sal_" + Date.now(),
+                        const txId = "tx_sal_" + Date.now() + "_" + st.id;
+                        const txRef = fs.collection("transactions").doc(txId);
+                        batch.set(txRef, {
+                            id: txId,
+                            studentId: st.id,
                             date: new Date().toISOString(),
+                            description: `💼 정기 학급 월급 지급 (실수령액: ${stNet} ${getCurrencyName()})`,
                             type: "deposit",
-                            amount: incomeTax,
-                            description: `월급 소득세 공제 세입 적립 (${st.name} 학생 급여 소득세 10%)`
+                            amount: stNet,
+                            balanceAfter: newBalance,
+                            isSavingsMaturity: false
+                        });
+
+                        const historyId = "sal_hist_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                        const currentHistories = st.salaryHistories || [];
+                        const updatedHistories = [...currentHistories, {
+                            id: historyId,
+                            txId: txId,
+                            date: new Date().toISOString(),
+                            base: stBase,
+                            allowances: [
+                                { name: "기본급", amount: stBase },
+                                { name: "추가 수당(보너스)", amount: bonus }
+                            ],
+                            deductions: [
+                                { name: "소득세 (10%)", amount: stTax },
+                                { name: "건강보험료", amount: health },
+                                { name: "공동 전기세", amount: electric },
+                                { name: "학교 급식비", amount: meals },
+                                { name: "책상 자리 임대료", amount: rent },
+                                { name: "지각/행동 삭감액", amount: deduct }
+                            ],
+                            comment: comment || "이번 달도 학급을 위해 성실하게 수고해 주어 고맙습니다!",
+                            netSalary: stNet
+                        }];
+
+                        const studentRef = fs.collection("users").doc(st.id);
+                        batch.update(studentRef, {
+                            balance: newBalance,
+                            salaryHistories: updatedHistories
                         });
                     }
 
-                    showToast(`📢 ${st.name} 학생에게 월급 지급 완료!`, "success");
+                    if (activeStudentsCount > 0) {
+                        // 국고 세금 가산
+                        const newTaxTotal = (db.tax.totalTax || 0) + totalTaxCollected;
+                        const taxStateRef = fs.collection("tax").doc("state");
+                        batch.set(taxStateRef, { totalTax: newTaxTotal }, { merge: true });
+
+                        const taxTxId = "tax_sal_" + Date.now();
+                        const taxTxRef = fs.collection("tax_transactions").doc(taxTxId);
+                        batch.set(taxTxRef, {
+                            id: taxTxId,
+                            date: new Date().toISOString(),
+                            type: "deposit",
+                            amount: totalTaxCollected,
+                            description: `월급 공제 세입 적립 (학급 전체 ${activeStudentsCount}명 일괄 공제 세금)`
+                        });
+                    }
+
+                    await batch.commit();
+                    showToast("📢 학급 전체 학생들에게 개별 직업 급여를 반영한 월급 지급 및 명세가 발행되었습니다.", "success");
+                } else {
+                    const st = db.students.find(s => s.id === target);
+                    if (st) {
+                        if (st.isFrozen) {
+                            showToast("동결 상태인 학생에게는 월급을 지급할 수 없습니다.", "danger");
+                            return;
+                        }
+                        const netSalary = base - (incomeTax + health + electric + meals + rent + deduct) + bonus;
+                        const newBalance = (st.balance || 0) + netSalary;
+
+                        const txId = "tx_sal_" + Date.now() + "_" + st.id;
+                        const txRef = fs.collection("transactions").doc(txId);
+                        batch.set(txRef, {
+                            id: txId,
+                            studentId: st.id,
+                            date: new Date().toISOString(),
+                            description: `💼 개별 월급 지급 (실수령액: ${netSalary} ${getCurrencyName()})`,
+                            type: "deposit",
+                            amount: netSalary,
+                            balanceAfter: newBalance,
+                            isSavingsMaturity: false
+                        });
+
+                        const historyId = "sal_hist_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                        const currentHistories = st.salaryHistories || [];
+                        const updatedHistories = [...currentHistories, {
+                            id: historyId,
+                            txId: txId,
+                            date: new Date().toISOString(),
+                            base: base,
+                            allowances: [
+                                { name: "기본급", amount: base },
+                                { name: "추가 수당(보너스)", amount: bonus }
+                            ],
+                            deductions: [
+                                { name: "소득세 (10%)", amount: incomeTax },
+                                { name: "건강보험료", amount: health },
+                                { name: "공동 전기세", amount: electric },
+                                { name: "학교 급식비", amount: meals },
+                                { name: "책상 자리 임대료", amount: rent },
+                                { name: "지각/행동 삭감액", amount: deduct }
+                            ],
+                            comment: comment || "이번 달도 학급을 위해 성실하게 수고해 주어 고맙습니다!",
+                            netSalary: netSalary
+                        }];
+
+                        const studentRef = fs.collection("users").doc(st.id);
+                        batch.update(studentRef, {
+                            balance: newBalance,
+                            salaryHistories: updatedHistories
+                        });
+
+                        if (incomeTax > 0) {
+                            const newTaxTotal = (db.tax.totalTax || 0) + incomeTax;
+                            const taxStateRef = fs.collection("tax").doc("state");
+                            batch.set(taxStateRef, { totalTax: newTaxTotal }, { merge: true });
+
+                            const taxTxId = "tax_sal_" + Date.now();
+                            const taxTxRef = fs.collection("tax_transactions").doc(taxTxId);
+                            batch.set(taxTxRef, {
+                                id: taxTxId,
+                                date: new Date().toISOString(),
+                                type: "deposit",
+                                amount: incomeTax,
+                                description: `월급 소득세 공제 세입 적립 (${st.name} 학생 급여 소득세 10%)`
+                            });
+                        }
+
+                        await batch.commit();
+                        showToast(`📢 ${st.name} 학생에게 월급 지급 완료!`, "success");
+                    }
+                }
+
+                // 폼 필드 리셋
+                document.getElementById('salary-comment-input').value = "";
+                document.getElementById('salary-deduct-input').value = "0";
+                document.getElementById('salary-bonus-input').value = "0";
+            } catch (err) {
+                console.error("월급 지급 중 오류 발생: ", err);
+                alert("데이터베이스 저장에 실패했습니다. (에러: " + err.message + ")");
+                showToast("급여 지급 처리에 실패했습니다.", "danger");
+            } finally {
+                hideSpinner();
+                if (payBtn) {
+                    payBtn.disabled = false;
+                    payBtn.innerText = "📢 월급 최종 확정 및 지급";
                 }
             }
-
-            saveDB(db);
-            // 폼 필드 리셋
-            document.getElementById('salary-comment-input').value = "";
-            document.getElementById('salary-deduct-input').value = "0";
-            document.getElementById('salary-bonus-input').value = "0";
-            loadTabData("salary"); // 현재 탭 데이터 새로고침
         }
 
         // 특정 학생 거래내역 및 롤백 제어 패널 열기
@@ -2258,7 +2529,7 @@
             });
         }
 
-        function handleDepositFree() {
+        async function handleDepositFree() {
             const amountInput = document.getElementById('free-amount');
             const amount = parseInt(amountInput.value);
             if (isNaN(amount) || amount <= 0) {
@@ -2276,36 +2547,49 @@
                 return;
             }
 
-            // 자유 예금 입금 신청 대기 (db.savings에 type: "free" 로 보관)
-            db.savings.push({
-                id: "free_" + Date.now(),
-                studentId: currentUser.id,
-                studentName: student.name,
-                type: "free",
-                principal: amount,
-                interestRate: db.policies.freeRate,
-                startDate: new Date().toISOString(),
-                status: "pending"
-            });
+            showSpinner("예금 입금 신청 처리 중...");
+            try {
+                const batch = fs.batch();
+                
+                const savingId = "free_" + Date.now();
+                const savingRef = fs.collection("bank_savings").doc(savingId);
+                batch.set(savingRef, {
+                    id: savingId,
+                    studentId: currentUser.id,
+                    studentName: student.name,
+                    type: "free",
+                    principal: amount,
+                    interestRate: db.policies.freeRate,
+                    startDate: new Date().toISOString(),
+                    status: "pending"
+                });
 
-            db.transactions.push({
-                id: "tx_dep_pend_" + Date.now(),
-                studentId: currentUser.id,
-                date: new Date().toISOString(),
-                description: `⏳ 자유 예금 입금 신청 (교사 승인 대기중, 신청금액 ${amount}${getCurrencyName()})`,
-                type: "withdraw",
-                amount: amount,
-                balanceAfter: student.balance,
-                isSavingsMaturity: false
-            });
+                const txId = "tx_dep_pend_" + Date.now();
+                const txRef = fs.collection("transactions").doc(txId);
+                batch.set(txRef, {
+                    id: txId,
+                    studentId: currentUser.id,
+                    date: new Date().toISOString(),
+                    description: `⏳ 자유 예금 입금 신청 (교사 승인 대기중, 신청금액 ${amount}${getCurrencyName()})`,
+                    type: "withdraw",
+                    amount: amount,
+                    balanceAfter: student.balance,
+                    isSavingsMaturity: false
+                });
 
-            saveDB(db);
-            showToast("⏳ 자유 예금 입금 신청이 완료되었습니다. 교사 승인 시 차감 및 입금됩니다.", "warning");
-            amountInput.value = "";
-            loadTabData("bank");
+                await batch.commit();
+                showToast("⏳ 자유 예금 입금 신청이 완료되었습니다. 교사 승인 시 차감 및 입금됩니다.", "warning");
+                amountInput.value = "";
+            } catch (err) {
+                console.error("예금 입금 에러: ", err);
+                alert("데이터베이스 저장에 실패했습니다. (에러: " + err.message + ")");
+                showToast("입금 신청에 실패했습니다.", "danger");
+            } finally {
+                hideSpinner();
+            }
         }
 
-        function handleWithdrawFree() {
+        async function handleWithdrawFree() {
             const amountInput = document.getElementById('free-amount');
             const amount = parseInt(amountInput.value);
             if (isNaN(amount) || amount <= 0) {
@@ -2321,26 +2605,45 @@
                 return;
             }
 
-            student.freeDepositBalance = freeBal - amount;
-            student.balance += amount;
+            showSpinner("예금 출금 처리 중...");
+            try {
+                const batch = fs.batch();
+                
+                const nextFreeBal = freeBal - amount;
+                const nextBalance = (student.balance || 0) + amount;
+                
+                const studentRef = fs.collection("users").doc(currentUser.id);
+                batch.update(studentRef, {
+                    freeDepositBalance: nextFreeBal,
+                    balance: nextBalance
+                });
 
-            db.transactions.push({
-                id: "tx_wdr_" + Date.now(),
-                studentId: currentUser.id,
-                date: new Date().toISOString(),
-                description: `🏦 자유 예금 출금 완료 (예금잔고 ➡️ 통장잔고 이체)`,
-                type: "deposit",
-                amount: amount,
-                balanceAfter: student.balance,
-                isSavingsMaturity: false
-            });
-            saveDB(db);
-            showToast("자유 예금 출금 완료", "success");
-            amountInput.value = "";
-            loadTabData("bank");
+                const txId = "tx_wdr_" + Date.now();
+                const txRef = fs.collection("transactions").doc(txId);
+                batch.set(txRef, {
+                    id: txId,
+                    studentId: currentUser.id,
+                    date: new Date().toISOString(),
+                    description: `🏦 자유 예금 출금 완료 (예금잔고 ➡️ 통장잔고 이체)`,
+                    type: "deposit",
+                    amount: amount,
+                    balanceAfter: nextBalance,
+                    isSavingsMaturity: false
+                });
+
+                await batch.commit();
+                showToast("자유 예금 출금 완료", "success");
+                amountInput.value = "";
+            } catch (err) {
+                console.error("예금 출금 에러: ", err);
+                alert("데이터베이스 저장에 실패했습니다. (에러: " + err.message + ")");
+                showToast("출금 처리에 실패했습니다.", "danger");
+            } finally {
+                hideSpinner();
+            }
         }
 
-        function handleSubscribeSaving() {
+        async function handleSubscribeSaving() {
             const amountInput = document.getElementById('saving-amount');
             const amount = parseInt(amountInput.value);
             
@@ -2367,37 +2670,48 @@
                 return;
             }
 
-            // 적금 대기 신청 (승인 시점에 원금 차감)
-            const savingId = "sav_" + Date.now();
-            
-            db.savings.push({
-                id: savingId,
-                studentId: currentUser.id,
-                studentName: student.name,
-                type: "saving",
-                principal: amount,
-                interestRate: db.policies.savingRate,
-                termMonths: db.policies.savingTerm,
-                startDate: new Date().toISOString(),
-                endDate: new Date(Date.now() + db.policies.savingTerm * 30 * 24 * 60 * 60 * 1000).toISOString(),
-                status: "pending"
-            });
+            showSpinner("적금 가입 신청 중...");
+            try {
+                const batch = fs.batch();
+                
+                const savingId = "sav_" + Date.now();
+                const savingRef = fs.collection("bank_savings").doc(savingId);
+                batch.set(savingRef, {
+                    id: savingId,
+                    studentId: currentUser.id,
+                    studentName: student.name,
+                    type: "saving",
+                    principal: amount,
+                    interestRate: db.policies.savingRate,
+                    termMonths: db.policies.savingTerm,
+                    startDate: new Date().toISOString(),
+                    endDate: new Date(Date.now() + db.policies.savingTerm * 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    status: "pending"
+                });
 
-            db.transactions.push({
-                id: "tx_sav_pend_" + Date.now(),
-                studentId: currentUser.id,
-                date: new Date().toISOString(),
-                description: `⏳ 정기 적금 가입 신청 (교사 승인 대기중, 가입 원금 ${amount}${getCurrencyName()})`,
-                type: "withdraw",
-                amount: amount,
-                balanceAfter: student.balance,
-                isSavingsMaturity: false
-            });
+                const txId = "tx_sav_pend_" + Date.now();
+                const txRef = fs.collection("transactions").doc(txId);
+                batch.set(txRef, {
+                    id: txId,
+                    studentId: currentUser.id,
+                    date: new Date().toISOString(),
+                    description: `⏳ 정기 적금 가입 신청 (교사 승인 대기중, 가입 원금 ${amount}${getCurrencyName()})`,
+                    type: "withdraw",
+                    amount: amount,
+                    balanceAfter: student.balance,
+                    isSavingsMaturity: false
+                });
 
-            saveDB(db);
-            amountInput.value = "";
-            showToast("⏳ 적금 신청이 완료되었습니다. 교사의 승인 후 가입이 활성화되며 통장에서 원금이 차감됩니다.", "warning");
-            loadTabData("bank");
+                await batch.commit();
+                amountInput.value = "";
+                showToast("⏳ 적금 신청이 완료되었습니다. 교사의 승인 후 가입이 활성화되며 통장에서 원금이 차감됩니다.", "warning");
+            } catch (err) {
+                console.error("적금 가입 에러: ", err);
+                alert("데이터베이스 저장에 실패했습니다. (에러: " + err.message + ")");
+                showToast("적금 신청에 실패했습니다.", "danger");
+            } finally {
+                hideSpinner();
+            }
         }
 
         // 실시간 시간 흘러가는 렌더러 (Cron 비활성화 후 화면 렌더링용)
@@ -2630,169 +2944,273 @@
         }
 
         // 예금 및 적금 가입 신청 승인/반려 (실제 차감이 승인 시점에 이루어짐)
-        function handleApproveSaving(savingId, isApprove) {
-            const db = getDB();
-            const sIdx = db.savings.findIndex(s => s.id === savingId);
-            if (sIdx === -1) return;
-
-            const saving = db.savings[sIdx];
-            const student = db.students.find(st => st.id === saving.studentId);
-
-            if (isApprove) {
-                if (student.balance < saving.principal) {
-                    showToast("통장 잔고가 부족하여 승인할 수 없습니다.", "danger");
-                    return;
-                }
-
-                student.balance -= saving.principal;
-
-                if (saving.type === "free") {
-                    // 자유 예금 입금 승인
-                    student.freeDepositBalance = (student.freeDepositBalance || 0) + saving.principal;
-                    saving.status = "completed";
-                    
-                    db.transactions.push({
-                        id: "tx_dep_act_" + Date.now(),
-                        studentId: saving.studentId,
-                        date: new Date().toISOString(),
-                        description: `🏦 자유 예금 입금 최종 승인 완료 (원금 ${saving.principal}${getCurrencyName()} 저축)`,
-                        type: "withdraw",
-                        amount: saving.principal,
-                        balanceAfter: student.balance,
-                        isSavingsMaturity: false
-                    });
-                    showToast("자유 예금 입금 신청이 승인되어 예금에 저축되었습니다.", "success");
-                } else {
-                    // 정기 적금 승인
-                    saving.status = "active";
-                    saving.startDate = new Date().toISOString();
-                    const end = new Date();
-                    end.setMonth(end.getMonth() + saving.termMonths);
-                    saving.endDate = end.toISOString();
-                    
-                    db.transactions.push({
-                        id: "tx_sav_act_" + Date.now(),
-                        studentId: saving.studentId,
-                        date: new Date().toISOString(),
-                        description: `⏳ 정기 적금 가입 최종 승인 완료 (원금 ${saving.principal}${getCurrencyName()} 차감, 이율: 월 ${saving.interestRate}%)`,
-                        type: "withdraw",
-                        amount: saving.principal,
-                        balanceAfter: student.balance,
-                        isSavingsMaturity: false
-                    });
-                    showToast("정기 적금 가입이 최종 승인되었습니다.", "success");
-                }
-            } else {
-                // 반려: 통장에서 차감한 적이 없으므로 복구 불필요, 신청 내역만 삭제
-                if (saving.type === "free") {
-                    db.transactions.push({
-                        id: "tx_dep_rej_" + Date.now(),
-                        studentId: saving.studentId,
-                        date: new Date().toISOString(),
-                        description: `❌ 자유 예금 입금 신청 반려 (신청액 ${saving.principal}${getCurrencyName()} 반려)`,
-                        type: "withdraw",
-                        amount: 0,
-                        balanceAfter: student.balance,
-                        isSavingsMaturity: false
-                    });
-                    showToast("자유 예금 입금 신청을 반려했습니다.", "warning");
-                } else {
-                    db.transactions.push({
-                        id: "tx_sav_rej_" + Date.now(),
-                        studentId: saving.studentId,
-                        date: new Date().toISOString(),
-                        description: `❌ 정기 적금 가입 신청 반려`,
-                        type: "withdraw",
-                        amount: 0,
-                        balanceAfter: student.balance,
-                        isSavingsMaturity: false
-                    });
-                    showToast("정기 적금 가입 신청을 반려했습니다.", "warning");
-                }
-                db.savings.splice(sIdx, 1);
-            }
-
-            saveDB(db);
-            loadTabData("bank");
-        }
-
-        // 만기 적금 수동 지급 완료 (스케줄러 보조용)
-        function handlePayMaturedSaving(savingId) {
+        async function handleApproveSaving(savingId, isApprove) {
             const db = getDB();
             const saving = db.savings.find(s => s.id === savingId);
             if (!saving) return;
 
             const student = db.students.find(st => st.id === saving.studentId);
-            if (student) {
+            if (!student) return;
+
+            showSpinner("가입 신청 승인 처리 중입니다...");
+
+            try {
+                if (isApprove) {
+                    if (student.balance < saving.principal) {
+                        showToast("통장 잔고가 부족하여 승인할 수 없습니다.", "danger");
+                        return;
+                    }
+
+                    await fs.runTransaction(async (transaction) => {
+                        const savingRef = fs.collection("bank_savings").doc(savingId);
+                        const studentRef = fs.collection("users").doc(saving.studentId);
+
+                        const savingDoc = await transaction.get(savingRef);
+                        const studentDoc = await transaction.get(studentRef);
+
+                        if (!savingDoc.exists || savingDoc.data().status !== "pending") {
+                            throw new Error("이미 처리된 신청서입니다.");
+                        }
+
+                        const currentStudentBalance = studentDoc.exists ? (studentDoc.data().balance || 0) : 0;
+                        if (currentStudentBalance < saving.principal) {
+                            throw new Error("잔액이 부족합니다.");
+                        }
+
+                        // 1. 학생 잔고 차감
+                        const newBalance = currentStudentBalance - saving.principal;
+                        const updateData = { balance: newBalance };
+
+                        if (saving.type === "free") {
+                            const currentFreeDeposit = studentDoc.exists ? (studentDoc.data().freeDepositBalance || 0) : 0;
+                            updateData.freeDepositBalance = currentFreeDeposit + saving.principal;
+                            transaction.update(studentRef, updateData);
+
+                            transaction.update(savingRef, { status: "completed" });
+
+                            const txId = "tx_dep_act_" + Date.now();
+                            const txRef = fs.collection("transactions").doc(txId);
+                            transaction.set(txRef, {
+                                id: txId,
+                                studentId: saving.studentId,
+                                date: new Date().toISOString(),
+                                description: `🏦 자유 예금 입금 최종 승인 완료 (원금 ${saving.principal}${getCurrencyName()} 저축)`,
+                                type: "withdraw",
+                                amount: saving.principal,
+                                balanceAfter: newBalance,
+                                isSavingsMaturity: false
+                            });
+                        } else {
+                            transaction.update(studentRef, updateData);
+
+                            const end = new Date();
+                            end.setMonth(end.getMonth() + saving.termMonths);
+                            transaction.update(savingRef, {
+                                status: "active",
+                                startDate: new Date().toISOString(),
+                                endDate: end.toISOString()
+                            });
+
+                            const txId = "tx_sav_act_" + Date.now();
+                            const txRef = fs.collection("transactions").doc(txId);
+                            transaction.set(txRef, {
+                                id: txId,
+                                studentId: saving.studentId,
+                                date: new Date().toISOString(),
+                                description: `⏳ 정기 적금 가입 최종 승인 완료 (원금 ${saving.principal}${getCurrencyName()} 차감, 이율: 월 ${saving.interestRate}%)`,
+                                type: "withdraw",
+                                amount: saving.principal,
+                                balanceAfter: newBalance,
+                                isSavingsMaturity: false
+                            });
+                        }
+                    });
+
+                    if (saving.type === "free") {
+                        showToast("자유 예금 입금 신청이 승인되어 예금에 저축되었습니다.", "success");
+                    } else {
+                        showToast("정기 적금 가입이 최종 승인되었습니다.", "success");
+                    }
+                } else {
+                    // 반려 처리
+                    await fs.runTransaction(async (transaction) => {
+                        const savingRef = fs.collection("bank_savings").doc(savingId);
+                        const studentRef = fs.collection("users").doc(saving.studentId);
+                        
+                        const savingDoc = await transaction.get(savingRef);
+                        const studentDoc = await transaction.get(studentRef);
+
+                        if (!savingDoc.exists || savingDoc.data().status !== "pending") {
+                            throw new Error("이미 처리된 신청서입니다.");
+                        }
+
+                        const currentStudentBalance = studentDoc.exists ? (studentDoc.data().balance || 0) : 0;
+
+                        transaction.delete(savingRef);
+
+                        const txId = "tx_sav_rej_etc_" + Date.now();
+                        const txRef = fs.collection("transactions").doc(txId);
+                        
+                        const descText = saving.type === "free" 
+                            ? `❌ 자유 예금 입금 신청 반려 (신청액 ${saving.principal}${getCurrencyName()} 반려)`
+                            : `❌ 정기 적금 가입 신청 반려`;
+
+                        transaction.set(txRef, {
+                            id: txId,
+                            studentId: saving.studentId,
+                            date: new Date().toISOString(),
+                            description: descText,
+                            type: "withdraw",
+                            amount: 0,
+                            balanceAfter: currentStudentBalance,
+                            isSavingsMaturity: false
+                        });
+                    });
+
+                    if (saving.type === "free") {
+                        showToast("자유 예금 입금 신청을 반려했습니다.", "warning");
+                    } else {
+                        showToast("정기 적금 가입 신청을 반려했습니다.", "warning");
+                    }
+                }
+            } catch (error) {
+                console.error("Error approving saving: ", error);
+                showToast("🚫 승인 처리 중 오류가 발생했습니다: " + error.message, "danger");
+            } finally {
+                hideSpinner();
+            }
+        }
+
+        // 만기 적금 수동 지급 완료 (스케줄러 보조용)
+        async function handlePayMaturedSaving(savingId) {
+            const db = getDB();
+            const saving = db.savings.find(s => s.id === savingId);
+            if (!saving) return;
+
+            const student = db.students.find(st => st.id === saving.studentId);
+            if (!student) return;
+
+            showSpinner("만기 적금 수동 지급 처리 중입니다...");
+
+            try {
                 const interest = Math.round(saving.principal * (saving.interestRate / 100) * saving.termMonths);
                 const totalPayout = saving.principal + interest;
 
-                student.balance += totalPayout;
-                saving.status = "completed";
+                await fs.runTransaction(async (transaction) => {
+                    const savingRef = fs.collection("bank_savings").doc(savingId);
+                    const studentRef = fs.collection("users").doc(saving.studentId);
 
-                db.transactions.push({
-                    id: "tx_mat_payout_" + Date.now(),
-                    studentId: student.id,
-                    date: new Date().toISOString(),
-                    description: `🎉 적금 만기 원금+이자 수령 (원금 ${saving.principal} + 이자 ${interest})`,
-                    type: "deposit",
-                    amount: totalPayout,
-                    balanceAfter: student.balance,
-                    isSavingsMaturity: true
+                    const savingDoc = await transaction.get(savingRef);
+                    const studentDoc = await transaction.get(studentRef);
+
+                    if (!savingDoc.exists || savingDoc.data().status !== "active") {
+                        throw new Error("활성화 상태가 아니거나 이미 해지된 적금입니다.");
+                    }
+
+                    const currentBalance = studentDoc.exists ? (studentDoc.data().balance || 0) : 0;
+                    const newBalance = currentBalance + totalPayout;
+
+                    // 1. 학생 잔고 지급
+                    transaction.update(studentRef, { balance: newBalance });
+
+                    // 2. 적금 완료 처리
+                    transaction.update(savingRef, { 
+                        status: "completed",
+                        payoutDate: new Date().toISOString(),
+                        payoutAmount: totalPayout
+                    });
+
+                    // 3. 거래 내역 기재
+                    const txId = "tx_mat_payout_" + Date.now();
+                    const txRef = fs.collection("transactions").doc(txId);
+                    transaction.set(txRef, {
+                        id: txId,
+                        studentId: student.id,
+                        date: new Date().toISOString(),
+                        description: `🎉 적금 만기 원금+이자 수령 (원금 ${saving.principal} + 이자 ${interest})`,
+                        type: "deposit",
+                        amount: totalPayout,
+                        balanceAfter: newBalance,
+                        isSavingsMaturity: true
+                    });
                 });
 
-                saveDB(db);
                 showToast(`${student.name} 학생에게 적금 만기금 ${totalPayout} ${getCurrencyName()}을 지급 완료하였습니다!`, "success");
-                loadTabData("bank");
+            } catch (error) {
+                console.error("Error manual matured payout: ", error);
+                showToast("🚫 만기금 지급 중 오류가 발생했습니다: " + error.message, "danger");
+            } finally {
+                hideSpinner();
             }
         }
 
         // 적금 만기 자동 이체 스케줄러 함수 (1초마다 호출)
-        function checkAndProcessMaturedSavings() {
+        async function checkAndProcessMaturedSavings() {
             const db = getDB();
             const now = new Date();
-            let updated = false;
+            
+            // 만기된 적금들 필터링
+            const maturedSavings = db.savings.filter(s => 
+                (s.type === "saving" || !s.type) && 
+                s.status === "active" && 
+                now >= new Date(s.endDate)
+            );
 
-            db.savings.forEach(s => {
-                if ((s.type === "saving" || !s.type) && s.status === "active" && now >= new Date(s.endDate)) {
-                    const student = db.students.find(st => st.id === s.studentId);
-                    if (student) {
-                        const interest = Math.round(s.principal * (s.interestRate / 100) * s.termMonths);
-                        const totalPayout = s.principal + interest;
-
-                        student.balance += totalPayout;
-                        s.status = "completed";
-                        s.payoutDate = now.toISOString();
-                        s.payoutAmount = totalPayout;
-
-                        db.transactions.push({
-                            id: "tx_sav_auto_mat_" + Date.now() + "_" + s.studentId,
+            for (const s of maturedSavings) {
+                try {
+                    // 트랜잭션 실행으로 중복 지급 방지
+                    await fs.runTransaction(async (transaction) => {
+                        const savingRef = fs.collection("bank_savings").doc(s.id);
+                        const studentRef = fs.collection("users").doc(s.studentId);
+                        
+                        const savingDoc = await transaction.get(savingRef);
+                        const studentDoc = await transaction.get(studentRef);
+                        
+                        if (!savingDoc.exists || !studentDoc.exists) return;
+                        
+                        const savingData = savingDoc.data();
+                        const studentData = studentDoc.data();
+                        
+                        // 이미 다른 기기에 의해 만기 처리되었거나 활성 상태가 아니면 패스
+                        if (savingData.status !== "active") return;
+                        
+                        const interest = Math.round(savingData.principal * (savingData.interestRate / 100) * savingData.termMonths);
+                        const totalPayout = savingData.principal + interest;
+                        
+                        const newBalance = (studentData.balance || 0) + totalPayout;
+                        
+                        // 학생 잔액 업데이트
+                        transaction.update(studentRef, { balance: newBalance });
+                        
+                        // 적금 상태 업데이트
+                        transaction.update(savingRef, {
+                            status: "completed",
+                            payoutDate: now.toISOString(),
+                            payoutAmount: totalPayout
+                        });
+                        
+                        // 거래 내역 추가
+                        const txId = "tx_sav_auto_mat_" + Date.now() + "_" + s.studentId;
+                        const txRef = fs.collection("transactions").doc(txId);
+                        transaction.set(txRef, {
+                            id: txId,
                             studentId: s.studentId,
                             date: now.toISOString(),
-                            description: `📈 정기 적금 만기 자동 이체 (원금 ${s.principal.toLocaleString()} + 이자 ${interest.toLocaleString()} 수령)`,
+                            description: `📈 정기 적금 만기 자동 이체 (원금 ${savingData.principal.toLocaleString()} + 이자 ${interest.toLocaleString()} 수령)`,
                             type: "deposit",
                             amount: totalPayout,
-                            balanceAfter: student.balance,
+                            balanceAfter: newBalance,
                             isSavingsMaturity: true
                         });
-                        updated = true;
-
+                        
                         if (currentUser && currentUser.id === s.studentId) {
                             showToast(`🎉 정기 적금이 만기되어 원금+이자 총 ${totalPayout} ${getCurrencyName()}이 자동 이체되었습니다!`, "success");
                         }
-                    }
-                }
-            });
-
-            if (updated) {
-                saveDB(db);
-                const activeNav = document.querySelector('.nav-item.active');
-                if (activeNav && currentUser) {
-                    const tabId = activeNav.id.replace('nav-', '');
-                    loadTabData(tabId);
+                    });
+                } catch (err) {
+                    console.error("적금 자동 만기 처리 실패: ", err);
                 }
             }
-        }
 
         // 금융 및 정책 변경
         function saveBankPolicies() {
@@ -2937,14 +3355,14 @@
             currentSelectedItemId = null;
         }
 
-        function handleConfirmPurchase() {
+        async function handleConfirmPurchase() {
             if (!currentSelectedItemId) return;
             const productId = currentSelectedItemId;
             closeShopDetailModal();
-            handleBuyItem(productId);
+            await handleBuyItem(productId);
         }
 
-        function handleBuyItem(productId) {
+        async function handleBuyItem(productId) {
             const db = getDB();
             const item = db.shop.find(p => p.id === productId);
             const student = db.students.find(s => s.id === currentUser.id);
@@ -2996,23 +3414,31 @@
             }
 
             // ── 결제 승인 대기 등록 (전체 상품 승인제 일원화) ──
-            const pendingId = "pend_" + Date.now();
-            db.pendingPayments.push({
-                id: pendingId,
-                studentId: currentUser.id,
-                studentName: student.name,
-                productId: productId,
-                productName: item.name,
-                basePrice: finalPrice,
-                vat: vat,
-                netPrice: netPrice,
-                amount: totalCost,
-                status: "pending",
-                date: new Date().toISOString()
-            });
-            saveDB(db);
-            showToast(`⏳ 구매 신청 완료! 교사의 결제 승인 후 지갑에서 ${getCurrencyName()}이 차감되고 인벤토리에 지급됩니다.`, "warning");
-            loadTabData("shop");
+            showSpinner("상품 구매 신청을 전송하는 중입니다...");
+            
+            try {
+                const pendingId = "pend_" + Date.now();
+                await fs.collection("shop_orders").doc(pendingId).set({
+                    id: pendingId,
+                    type: "purchase_request",
+                    studentId: currentUser.id,
+                    studentName: student.name,
+                    productId: productId,
+                    productName: item.name,
+                    basePrice: finalPrice,
+                    vat: vat,
+                    netPrice: netPrice,
+                    amount: totalCost,
+                    status: "pending",
+                    date: new Date().toISOString()
+                });
+                showToast(`⏳ 구매 신청 완료! 교사의 결제 승인 후 지갑에서 ${getCurrencyName()}이 차감되고 인벤토리에 지급됩니다.`, "warning");
+            } catch (error) {
+                console.error("Error purchase item: ", error);
+                showToast("🚫 구매 신청 중 오류가 발생했습니다. 다시 시도해 주세요.", "danger");
+            } finally {
+                hideSpinner();
+            }
         }
 
         function handleSaveShopSettings() {
@@ -3385,56 +3811,99 @@
         }
 
         // 아이템 사용 요청 교사 승인/반려
-        function handleApproveUseRequest(reqId, isApprove) {
+        async function handleApproveUseRequest(reqId, isApprove) {
             const db = getDB();
-            const reqIdx = db.useRequests.findIndex(r => r.id === reqId);
-            if (reqIdx === -1) return;
+            const req = db.useRequests.find(r => r.id === reqId);
+            if (!req) return;
 
-            const req = db.useRequests[reqIdx];
             const student = db.students.find(s => s.id === req.studentId);
-            const invIndex = db.inventory.findIndex(inv => inv.id === req.inventoryId);
+            const inventoryItem = db.inventory.find(inv => inv.id === req.inventoryId);
 
-            if (isApprove) {
-                if (invIndex === -1) {
-                    showToast("해당 학생이 아이템을 보유하고 있지 않아 승인할 수 없습니다.", "danger");
-                    db.useRequests.splice(reqIdx, 1);
-                    saveDB(db);
-                    loadTabData("shop");
-                    return;
-                }
+            showSpinner("사용 요청 처리 중입니다...");
 
-                // 단수 독립 아이템이므로 인벤토리에서 완전 제거
-                db.inventory.splice(invIndex, 1);
-
-                // 대장 기록용 사용 날짜(usedDate) 동기화 갱신
-                if (Array.isArray(db.shopPurchaseLog)) {
-                    const matchLog = db.shopPurchaseLog.find(l => l.studentId === req.studentId && l.productId === req.productId && !l.usedDate);
-                    if (matchLog) {
-                        matchLog.usedDate = new Date().toISOString();
+            try {
+                if (isApprove) {
+                    if (!inventoryItem) {
+                        showToast("해당 학생이 아이템을 보유하고 있지 않아 승인할 수 없습니다.", "danger");
+                        await fs.collection("shop_orders").doc(reqId).delete();
+                        return;
                     }
+
+                    // 트랜잭션 실행
+                    await fs.runTransaction(async (transaction) => {
+                        const invRef = fs.collection("inventory").doc(req.inventoryId);
+                        const reqRef = fs.collection("shop_orders").doc(reqId);
+                        
+                        const invDoc = await transaction.get(invRef);
+                        const reqDoc = await transaction.get(reqRef);
+
+                        if (!reqDoc.exists || reqDoc.data().status !== "pending") {
+                            throw new Error("이미 처리된 사용 요청입니다.");
+                        }
+
+                        if (!invDoc.exists || (invDoc.data().quantity || 0) <= 0) {
+                            throw new Error("보유하고 있는 아이템이 없습니다.");
+                        }
+
+                        // 1. 인벤토리에서 완전 제거
+                        transaction.delete(invRef);
+
+                        // 2. 대장 기록용 사용 날짜(usedDate) 동기화 갱신
+                        const purchasesRef = fs.collection("shop_orders");
+                        const querySnapshot = await purchasesRef
+                            .where("studentId", "==", req.studentId)
+                            .where("productId", "==", req.productId)
+                            .where("type", "==", "completed_purchase")
+                            .get();
+                        
+                        let targetPurchaseDocRef = null;
+                        querySnapshot.forEach(doc => {
+                            const data = doc.data();
+                            if (!data.usedDate && !targetPurchaseDocRef) {
+                                targetPurchaseDocRef = doc.ref;
+                            }
+                        });
+
+                        if (targetPurchaseDocRef) {
+                            transaction.update(targetPurchaseDocRef, {
+                                usedDate: new Date().toISOString()
+                            });
+                        }
+
+                        // 사용 요청 문서는 type을 "completed_use"로 바꾸어 대장에 남긴다.
+                        transaction.update(reqRef, {
+                            type: "completed_use",
+                            status: "approved",
+                            usedDate: new Date().toISOString()
+                        });
+
+                        // 3. 거래 내역 기재
+                        const txId = "tx_use_app_" + Date.now();
+                        const txRef = fs.collection("transactions").doc(txId);
+                        transaction.set(txRef, {
+                            id: txId,
+                            studentId: req.studentId,
+                            date: new Date().toISOString(),
+                            description: `🎒 소유물 사용 최종 승인: ${req.productName} (수량 1개 사용 소멸)`,
+                            type: "withdraw",
+                            amount: 0,
+                            balanceAfter: student ? student.balance : 0,
+                            isSavingsMaturity: false
+                        });
+                    });
+
+                    showToast(`✔️ ${student ? student.name : req.studentId} 학생의 ${req.productName} 사용이 최종 승인되었습니다.`, "success");
+                } else {
+                    // 반려 시
+                    await fs.collection("shop_orders").doc(reqId).delete();
+                    showToast(`❌ ${student ? student.name : req.studentId} 학생의 사용 요청을 반려 처리했습니다.`, "warning");
                 }
-
-                // 거래 내역 기재
-                db.transactions.push({
-                    id: "tx_use_app_" + Date.now(),
-                    studentId: req.studentId,
-                    date: new Date().toISOString(),
-                    description: `🎒 소유물 사용 최종 승인: ${req.productName} (수량 1개 사용 소멸)`,
-                    type: "withdraw",
-                    amount: 0,
-                    balanceAfter: student.balance,
-                    isSavingsMaturity: false
-                });
-
-                showToast(`✔️ ${student.name} 학생의 ${req.productName} 사용이 최종 승인되었습니다.`, "success");
-            } else {
-                showToast(`❌ ${student.name} 학생의 사용 요청을 반려 처리했습니다.`, "warning");
+            } catch (error) {
+                console.error("Error approving use request: ", error);
+                showToast("🚫 사용 승인 중 오류가 발생했습니다: " + error.message, "danger");
+            } finally {
+                hideSpinner();
             }
-
-            // 요청 삭제
-            db.useRequests.splice(reqIdx, 1);
-            saveDB(db);
-            loadTabData("shop");
         }
 
         // 교사용 상품 순서 정렬
@@ -3513,116 +3982,187 @@
         }
 
         // 상점 결제 처리 승인/반려
-        function handleApproveShopPayment(paymentId, isApprove) {
+        async function handleApproveShopPayment(paymentId, isApprove) {
             const db = getDB();
-            const pIdx = db.pendingPayments.findIndex(p => p.id === paymentId);
-            if (pIdx === -1) return;
+            const payment = db.pendingPayments.find(p => p.id === paymentId);
+            if (!payment) return;
 
-            const payment = db.pendingPayments[pIdx];
             const student = db.students.find(s => s.id === payment.studentId);
             const item = db.shop.find(s => s.id === payment.productId);
 
-            if (isApprove) {
-                if (student.balance < payment.amount) {
-                    showToast("학생의 치킨 잔액이 부족해져 결제를 승인할 수 없습니다.", "danger");
-                    return;
+            showSpinner("결제 승인 처리 중입니다...");
+
+            try {
+                if (isApprove) {
+                    if (student.balance < payment.amount) {
+                        showToast("학생의 치킨 잔액이 부족해져 결제를 승인할 수 없습니다.", "danger");
+                        return;
+                    }
+
+                    const vat = payment.vat !== undefined ? payment.vat : Math.round(payment.amount * 0.1);
+                    const netPrice = payment.amount - vat;
+
+                    // 트랜잭션 실행
+                    await fs.runTransaction(async (transaction) => {
+                        const studentRef = fs.collection("users").doc(student.id);
+                        const taxRef = fs.collection("tax").doc("state");
+                        const itemRef = fs.collection("shop_items").doc(payment.productId);
+                        const paymentRef = fs.collection("shop_orders").doc(paymentId);
+
+                        const studentDoc = await transaction.get(studentRef);
+                        const taxDoc = await transaction.get(taxRef);
+                        const itemDoc = await transaction.get(itemRef);
+                        const paymentDoc = await transaction.get(paymentRef);
+
+                        if (!paymentDoc.exists || paymentDoc.data().status !== "pending") {
+                            throw new Error("이미 처리된 결제건입니다.");
+                        }
+
+                        const currentStudentBalance = studentDoc.exists ? (studentDoc.data().balance || 0) : 0;
+                        if (currentStudentBalance < payment.amount) {
+                            throw new Error("잔액이 부족합니다.");
+                        }
+
+                        // 1. 학생 잔고 차감
+                        transaction.update(studentRef, { balance: currentStudentBalance - payment.amount });
+
+                        // 2. 세금 누적
+                        const currentTax = taxDoc.exists ? (taxDoc.data().totalTax || 0) : 0;
+                        transaction.update(taxRef, { totalTax: currentTax + vat });
+
+                        // 3. 상품 구매수 누적
+                        const currentPurchaseCount = itemDoc.exists ? (itemDoc.data().purchaseCount || 0) : 0;
+                        transaction.update(itemRef, { purchaseCount: currentPurchaseCount + 1 });
+
+                        // 4. 결제 요청 상태 업데이트 (completed_purchase 타입으로 변경)
+                        transaction.update(paymentRef, {
+                            type: "completed_purchase",
+                            status: "approved",
+                            usedDate: null
+                        });
+
+                        // 5. 세금 거래 내역 추가
+                        const taxTxId = "tax_shop_app_" + Date.now();
+                        const taxTxRef = fs.collection("tax_transactions").doc(taxTxId);
+                        transaction.set(taxTxRef, {
+                            id: taxTxId,
+                            date: new Date().toISOString(),
+                            type: "deposit",
+                            amount: vat,
+                            description: `상점 결제 승인 부가세 세입 (${student.name} - ${payment.productName}, 순매출 ${netPrice}치킨)`
+                        });
+
+                        // 6. 학생 거래 내역 추가
+                        const txId = "tx_app_" + Date.now();
+                        const txRef = fs.collection("transactions").doc(txId);
+                        transaction.set(txRef, {
+                            id: txId,
+                            studentId: student.id,
+                            date: new Date().toISOString(),
+                            description: `🛍️ 상품 구매 최종 승인: ${payment.productName} (VAT포함 ${payment.amount}, 순매출 ${netPrice}, 부가세 ${vat})`,
+                            type: "withdraw",
+                            amount: payment.amount,
+                            balanceAfter: currentStudentBalance - payment.amount,
+                            productId: payment.productId,
+                            productName: payment.productName,
+                            isSavingsMaturity: false
+                        });
+
+                        // 7. 인벤토리에 추가
+                        const invId = "inv_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                        const invRef = fs.collection("inventory").doc(invId);
+                        transaction.set(invRef, {
+                            id: invId,
+                            studentId: student.id,
+                            productId: payment.productId,
+                            quantity: 1,
+                            lastUpdated: new Date().toISOString(),
+                            purchaseDate: new Date().toISOString()
+                        });
+                    });
+
+                    showToast(`✔️ 결제 승인 완료 (${payment.amount}치킨, VAT ${vat} 포함)`, "success");
+                } else {
+                    // 반려 시
+                    await fs.collection("shop_orders").doc(paymentId).delete();
+                    showToast("❌ 결제 반려 처리", "warning");
                 }
-
-                student.balance -= payment.amount;
-                // Inclusive VAT: payment.amount 안에 VAT 포함
-                const vat = payment.vat !== undefined ? payment.vat : Math.round(payment.amount * 0.1);
-                const netPrice = payment.amount - vat;
-                db.tax.totalTax += vat;
-                item.purchaseCount += 1;
-
-                db.taxTransactions.push({
-                    id: "tax_shop_app_" + Date.now(),
-                    date: new Date().toISOString(),
-                    type: "deposit",
-                    amount: vat,
-                    description: `상점 결제 승인 부가세 세입 (${student.name} - ${item.name}, 순매출 ${netPrice}치킨)`
-                });
-
-                db.transactions.push({
-                    id: "tx_app_" + Date.now(),
-                    studentId: student.id,
-                    date: new Date().toISOString(),
-                    description: `🛍️ 상품 구매 최종 승인: ${payment.productName} (VAT포함 ${payment.amount}, 순매출 ${netPrice}, 부가세 ${vat})`,
-                    type: "withdraw",
-                    amount: payment.amount,
-                    balanceAfter: student.balance,
-                    productId: payment.productId,
-                    productName: payment.productName,
-                    isSavingsMaturity: false
-                });
-
-                // 구매 내역 대장 기록
-                if (!db.shopPurchaseLog) db.shopPurchaseLog = [];
-                db.shopPurchaseLog.push({
-                    id: "spl_app_" + Date.now(),
-                    date: new Date().toISOString(),
-                    studentId: student.id,
-                    studentName: student.name,
-                    productId: payment.productId,
-                    productName: payment.productName,
-                    category: item ? item.category : "coupon",
-                    totalCost: payment.amount,
-                    netPrice: netPrice,
-                    vat: vat,
-                    type: "purchase"
-                });
-
-                // 동일 상품 중복 구매 시 개별 카드로 독립 관리되도록 수량을 누적하지 않고 고유 ID로 push
-                db.inventory.push({
-                    id: "inv_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5),
-                    studentId: student.id,
-                    productId: payment.productId,
-                    quantity: 1,
-                    lastUpdated: new Date().toISOString(),
-                    purchaseDate: new Date().toISOString()
-                });
-                showToast(`✔️ 결제 승인 완료 (${payment.amount}치킨, VAT ${vat} 포함)`, "success");
-            } else {
-                showToast("❌ 결제 반려 처리", "warning");
+            } catch (error) {
+                console.error("Error approving shop payment: ", error);
+                showToast("🚫 결제 승인 중 오류가 발생했습니다: " + error.message, "danger");
+            } finally {
+                hideSpinner();
             }
-
-            db.pendingPayments.splice(pIdx, 1);
-            saveDB(db);
-            loadTabData("shop");
         }
 
         // 인벤토리 권리/간식 소모(차감)
-        function handleDeductInventoryItem(studentId, productId) {
+        async function handleDeductInventoryItem(studentId, productId) {
             const db = getDB();
-            const invIndex = db.inventory.findIndex(inv => inv.studentId === studentId && inv.productId === productId);
-            if (invIndex > -1) {
-                db.inventory.splice(invIndex, 1);
+            const inv = db.inventory.find(i => i.studentId === studentId && i.productId === productId);
+            if (!inv) return;
 
-                const student = db.students.find(s => s.id === studentId);
-                const prod = db.shop.find(p => p.id === productId);
+            const student = db.students.find(s => s.id === studentId);
+            const prod = db.shop.find(p => p.id === productId);
+            if (!student || !prod) return;
 
-                // 대장 기록용 사용 날짜(usedDate) 동기화 갱신
-                if (Array.isArray(db.shopPurchaseLog)) {
-                    const matchLog = db.shopPurchaseLog.find(l => l.studentId === studentId && l.productId === productId && !l.usedDate);
-                    if (matchLog) {
-                        matchLog.usedDate = new Date().toISOString();
+            showSpinner("소유물 사용 완료 서명을 처리 중입니다...");
+
+            try {
+                // 트랜잭션 처리
+                await fs.runTransaction(async (transaction) => {
+                    const invRef = fs.collection("inventory").doc(inv.id);
+                    const invDoc = await transaction.get(invRef);
+
+                    if (!invDoc.exists) {
+                        throw new Error("보유하고 있는 아이템이 없습니다.");
                     }
-                }
 
-                db.transactions.push({
-                    id: "tx_use_item_" + Date.now(),
-                    studentId: studentId,
-                    date: new Date().toISOString(),
-                    description: `📢 소유물 사용 소모: ${prod.name} (선생님 사용 완료 서명)`,
-                    type: "withdraw",
-                    amount: 0,
-                    balanceAfter: student.balance,
-                    isSavingsMaturity: false
+                    // 1. 인벤토리에서 완전 제거
+                    transaction.delete(invRef);
+
+                    // 2. 대장 기록용 사용 날짜(usedDate) 갱신
+                    const purchasesRef = fs.collection("shop_orders");
+                    const querySnapshot = await purchasesRef
+                        .where("studentId", "==", studentId)
+                        .where("productId", "==", productId)
+                        .where("type", "==", "completed_purchase")
+                        .get();
+                    
+                    let targetPurchaseDocRef = null;
+                    querySnapshot.forEach(doc => {
+                        const data = doc.data();
+                        if (!data.usedDate && !targetPurchaseDocRef) {
+                            targetPurchaseDocRef = doc.ref;
+                        }
+                    });
+
+                    if (targetPurchaseDocRef) {
+                        transaction.update(targetPurchaseDocRef, {
+                            usedDate: new Date().toISOString()
+                        });
+                    }
+
+                    // 3. 거래 내역 기재
+                    const txId = "tx_use_item_" + Date.now();
+                    const txRef = fs.collection("transactions").doc(txId);
+                    transaction.set(txRef, {
+                        id: txId,
+                        studentId: studentId,
+                        date: new Date().toISOString(),
+                        description: `📢 소유물 사용 소모: ${prod.name} (선생님 사용 완료 서명)`,
+                        type: "withdraw",
+                        amount: 0,
+                        balanceAfter: student.balance,
+                        isSavingsMaturity: false
+                    });
                 });
 
-                saveDB(db);
-                showToast(`🎫 ${student.name} 학생의 ${prod.name} 아이템을 1개 사용(차감) 처리했습니다.`, "success");
-                loadTabData("shop");
+                showToast(`✔️ ${student.name} 학생의 ${prod.name} 사용 완료 서명이 처리되었습니다.`, "success");
+            } catch (error) {
+                console.error("Error deducting inventory item: ", error);
+                showToast("🚫 처리 중 오류가 발생했습니다: " + error.message, "danger");
+            } finally {
+                hideSpinner();
             }
         }
 
@@ -3630,8 +4170,12 @@
         // 6. TAB 4: ENVIRONMENT LOGIC
         // ==========================================
         let tempReportImage = null;
+        let tempReportFile = null;
 
         function previewEnvImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            tempReportFile = file;
             const reader = new FileReader();
             reader.onload = function() {
                 const preview = document.getElementById('env-preview');
@@ -3640,13 +4184,13 @@
                 document.getElementById('upload-instruction').style.display = "none";
                 tempReportImage = reader.result;
             }
-            reader.readAsDataURL(event.target.files[0]);
+            reader.readAsDataURL(file);
         }
 
-        function handleSubmitEnvReport() {
+        async function handleSubmitEnvReport() {
             const actType = document.getElementById('env-activity-type').value;
             const desc = document.getElementById('env-desc').value.trim();
-            if (!tempReportImage) {
+            if (!tempReportFile) {
                 showToast("인증 사진을 업로드해 주세요.", "danger");
                 return;
             }
@@ -3661,34 +4205,54 @@
 
             if (!confirm("환경 정화 인증 보고서를 제출하시겠습니까?")) return;
 
-            const db = getDB();
-            const reportId = "env_" + Date.now();
-            
-            db.envReports.push({
-                id: reportId,
-                studentId: currentUser.id,
-                studentName: currentUser.name,
-                image: tempReportImage,
-                activityType: actType,
-                desc: desc,
-                status: "pending",
-                date: new Date().toISOString(),
-                activityDate: selectedDate   // 실제 실천 날짜
-            });
+            const submitBtn = document.querySelector("#tab-environment button[onclick='handleSubmitEnvReport()']");
+            if (submitBtn) submitBtn.disabled = true;
+            showSpinner("환경 정화 인증 사진 및 보고서를 업로드하는 중입니다...");
 
-            saveDB(db);
+            try {
+                const reportId = "env_" + Date.now();
+                
+                // Storage 업로드
+                const storageRef = firebase.storage().ref();
+                const fileExtension = tempReportFile.name.split('.').pop() || 'png';
+                const fileRef = storageRef.child(`env_reports/${currentUser.id}_${Date.now()}.${fileExtension}`);
+                
+                await fileRef.put(tempReportFile);
+                const downloadUrl = await fileRef.getDownloadURL();
 
-            document.getElementById('env-preview').style.display = "none";
-            document.getElementById('upload-instruction').style.display = "block";
-            document.getElementById('env-desc').value = "";
-            if (datePicker) datePicker.value = '';
-            if (db.envActivityTypes && db.envActivityTypes.length > 0) {
-                document.getElementById('env-activity-type').value = db.envActivityTypes[0].name;
+                // Firestore 저장
+                await fs.collection("env_reports").doc(reportId).set({
+                    id: reportId,
+                    studentId: currentUser.id,
+                    studentName: currentUser.name,
+                    image: downloadUrl,
+                    activityType: actType,
+                    desc: desc,
+                    status: "pending",
+                    date: new Date().toISOString(),
+                    activityDate: selectedDate
+                });
+
+                document.getElementById('env-preview').style.display = "none";
+                document.getElementById('upload-instruction').style.display = "block";
+                document.getElementById('env-desc').value = "";
+                if (datePicker) datePicker.value = '';
+                
+                const db = getDB();
+                if (db.envActivityTypes && db.envActivityTypes.length > 0) {
+                    document.getElementById('env-activity-type').value = db.envActivityTypes[0].name;
+                }
+                tempReportImage = null;
+                tempReportFile = null;
+
+                showToast("🌿 환경 인증 신청서가 제출되었습니다. 교사 확인 후 마일리지가 지급됩니다.", "success");
+            } catch (error) {
+                console.error("Error submitting env report: ", error);
+                showToast("🚫 보고서 제출 중 오류가 발생했습니다. 다시 시도해 주세요.", "danger");
+            } finally {
+                if (submitBtn) submitBtn.disabled = false;
+                hideSpinner();
             }
-            tempReportImage = null;
-
-            showToast("🌿 환경 인증 신청서가 제출되었습니다. 교사 확인 후 마일리지가 지급됩니다.", "success");
-            loadTabData("environment");
         }
 
         // 교사용 일별 환경 실천 출석 테이블 렌더링 (Override 데이터 반영)
@@ -3744,6 +4308,18 @@
                 datePicker.onchange = () => {
                     renderTeacherEnvAttendanceTable(getDB(), datePicker.value);
                 };
+            }
+
+            // 개별 마일리지 수동 지급 드롭다운 채우기
+            const select = document.getElementById('manual-mileage-student-select');
+            if (select) {
+                select.innerHTML = '<option value="">-- 학생 선택 --</option>';
+                db.students.forEach(st => {
+                    const opt = document.createElement('option');
+                    opt.value = st.id;
+                    opt.innerText = `${st.name} (${st.id})`;
+                    select.appendChild(opt);
+                });
             }
 
             // 환전 토글 초기화 (교사 환경 탭 전용)
@@ -3977,7 +4553,7 @@
             loadTabData("environment");
         }
 
-        function approveEnvReport(reportId) {
+        async function approveEnvReport(reportId) {
             const db = getDB();
             const rep = db.envReports.find(r => r.id === reportId);
             if (!rep) return;
@@ -3990,33 +4566,71 @@
                 return;
             }
 
-            const student = db.students.find(s => s.id === rep.studentId);
-            if (student) {
-                student.mileageBalance = (student.mileageBalance || 0) + rewardAmount;
-                student.mileage = student.mileageBalance;
-                rep.status = "approved";
-                rep.approvedDate = new Date().toISOString();
-                rep.rewardAmount = rewardAmount;
+            const approveBtn = document.querySelector(`button[onclick="approveEnvReport('${reportId}')"]`);
+            if (approveBtn) approveBtn.disabled = true;
+            showSpinner("환경 정화 보고서를 승인하는 중입니다...");
 
-                // 방어적 초기화 및 아카이브 저장
-                student.approvedArchive = student.approvedArchive || [];
-                student.approvedArchive.push(rep);
+            try {
+                const emlId = "eml_" + Date.now();
+                await fs.runTransaction(async (transaction) => {
+                    const reportRef = fs.collection("env_reports").doc(reportId);
+                    const studentRef = fs.collection("users").doc(rep.studentId);
+                    const emlRef = fs.collection("env_mileage_ledger").doc(emlId);
 
-                // ✅ 마일리지 장부 분리 — db.transactions 대신 envMileageLedger에만 기록
-                if (!Array.isArray(db.envMileageLedger)) db.envMileageLedger = [];
-                db.envMileageLedger.push({
-                    id: "eml_" + Date.now(),
-                    studentId: student.id,
-                    studentName: student.name,
-                    date: new Date().toISOString(),
-                    type: "photo",   // 사진 인증 승인
-                    description: `📷 사진인증 승인: ${rep.activityType || '기타'} (+${rewardAmount}점)`,
-                    amount: rewardAmount
+                    const reportDoc = await transaction.get(reportRef);
+                    const studentDoc = await transaction.get(studentRef);
+
+                    if (!reportDoc.exists || reportDoc.data().status !== "pending") {
+                        throw new Error("이미 처리된 보고서입니다.");
+                    }
+
+                    const studentData = studentDoc.exists ? studentDoc.data() : {};
+                    const newMileageBalance = (studentData.mileageBalance || 0) + rewardAmount;
+                    const approvedArchive = studentData.approvedArchive || [];
+                    
+                    // rep 객체 업데이트 버전 만들기
+                    const updatedRep = {
+                        ...reportDoc.data(),
+                        status: "approved",
+                        approvedDate: new Date().toISOString(),
+                        rewardAmount: rewardAmount
+                    };
+
+                    approvedArchive.push(updatedRep);
+
+                    // 1. 학생 데이터 업데이트 (마일리지 점수 및 아카이브)
+                    transaction.update(studentRef, {
+                        mileageBalance: newMileageBalance,
+                        mileage: newMileageBalance,
+                        approvedArchive: approvedArchive
+                    });
+
+                    // 2. 보고서 상태 업데이트
+                    transaction.update(reportRef, {
+                        status: "approved",
+                        approvedDate: new Date().toISOString(),
+                        rewardAmount: rewardAmount
+                    });
+
+                    // 3. 마일리지 장부 기록 추가
+                    transaction.set(emlRef, {
+                        id: emlId,
+                        studentId: rep.studentId,
+                        studentName: studentData.name || rep.studentName,
+                        date: new Date().toISOString(),
+                        type: "photo",
+                        description: `📷 사진인증 승인: ${rep.activityType || '기타'} (+${rewardAmount}점)`,
+                        amount: rewardAmount
+                    });
                 });
-                
-                saveDB(db);
-                showToast(`${student.name} 학생의 사진인증을 확인하여 ${rewardAmount} 마일리지를 지급했습니다.`, "success");
-                loadTabData("environment");
+
+                showToast(`${rep.studentName} 학생의 사진인증을 확인하여 ${rewardAmount} 마일리지를 지급했습니다.`, "success");
+            } catch (error) {
+                console.error("Error approving env report: ", error);
+                showToast("🚫 승인 처리 중 오류가 발생했습니다: " + error.message, "danger");
+            } finally {
+                if (approveBtn) approveBtn.disabled = false;
+                hideSpinner();
             }
         }
 
@@ -4509,7 +5123,7 @@
         }
 
         // --- 마일리지 환전 로직 ---
-        function handleExchangeMileage() {
+        async function handleExchangeMileage() {
             const db = getDB();
             const student = db.students.find(s => s.id === currentUser.id);
             if (!student) return;
@@ -4549,43 +5163,65 @@
 
             const chickenReward = exchangeAmount; // 1:1 비율 (10점 -> 10치킨)
 
-            // 마일리지 차감 및 치킨 가산
-            student.mileageBalance = mileage - exchangeAmount;
-            student.mileage = student.mileageBalance;
-            student.balance = (student.balance || 0) + chickenReward;
+            const exchangeBtn = document.querySelector("#tab-environment button[onclick='handleExchangeMileage()']");
+            if (exchangeBtn) exchangeBtn.disabled = true;
+            showSpinner("마일리지 환전을 처리하고 있습니다...");
 
-            // 거래내역 추가
-            db.transactions.push({
-                id: "tx_env_exch_" + Date.now(),
-                studentId: student.id,
-                date: new Date().toISOString(),
-                description: `🌿 환경 마일리지 환전 (${exchangeAmount}점 ➡️ ${chickenReward}치킨 환전)`,
-                type: "deposit",
-                amount: chickenReward,
-                balanceAfter: student.balance,
-                isSavingsMaturity: false
-            });
+            try {
+                const txId = "tx_env_exch_" + Date.now();
+                const emlId = "eml_exch_" + Date.now();
 
-            // 마일리지 장부 기록 추가 (환전 차감)
-            if (!Array.isArray(db.envMileageLedger)) db.envMileageLedger = [];
-            db.envMileageLedger.push({
-                id: "eml_exch_" + Date.now(),
-                studentId: student.id,
-                studentName: student.name,
-                date: new Date().toISOString(),
-                type: "exchange",
-                description: `💵 치킨 환전 (${exchangeAmount}점 ➡️ ${chickenReward}치킨)`,
-                amount: -exchangeAmount
-            });
+                // Firestore batch 활용하여 여러 문서 한번에 업데이트
+                const batch = fs.batch();
 
-            // 동기화
-            currentUser.mileage = student.mileage;
-            currentUser.mileageBalance = student.mileageBalance;
-            currentUser.balance = student.balance;
+                // 1. 학생 지갑 및 마일리지 차감
+                const studentRef = fs.collection("users").doc(student.id);
+                batch.update(studentRef, {
+                    mileageBalance: mileage - exchangeAmount,
+                    mileage: mileage - exchangeAmount,
+                    balance: (student.balance || 0) + chickenReward
+                });
 
-            saveDB(db);
-            showToast(`💵 ${exchangeAmount} 마일리지를 ${chickenReward} 치킨으로 성공적으로 환전했습니다!`, "success");
-            loadTabData("environment");
+                // 2. 거래내역 추가
+                const txRef = fs.collection("transactions").doc(txId);
+                batch.set(txRef, {
+                    id: txId,
+                    studentId: student.id,
+                    date: new Date().toISOString(),
+                    description: `🌿 환경 마일리지 환전 (${exchangeAmount}점 ➡️ ${chickenReward}치킨 환전)`,
+                    type: "deposit",
+                    amount: chickenReward,
+                    balanceAfter: (student.balance || 0) + chickenReward,
+                    isSavingsMaturity: false
+                });
+
+                // 3. 마일리지 장부 기록 추가 (환전 차감)
+                const emlRef = fs.collection("env_mileage_ledger").doc(emlId);
+                batch.set(emlRef, {
+                    id: emlId,
+                    studentId: student.id,
+                    studentName: student.name,
+                    date: new Date().toISOString(),
+                    type: "exchange",
+                    description: `💵 치킨 환전 (${exchangeAmount}점 ➡️ ${chickenReward}치킨)`,
+                    amount: -exchangeAmount
+                });
+
+                await batch.commit();
+
+                // 로컬 currentUser 동기화
+                currentUser.mileage = mileage - exchangeAmount;
+                currentUser.mileageBalance = mileage - exchangeAmount;
+                currentUser.balance = (student.balance || 0) + chickenReward;
+
+                showToast(`💵 ${exchangeAmount} 마일리지를 ${chickenReward} 치킨으로 성공적으로 환전했습니다!`, "success");
+            } catch (error) {
+                console.error("Error exchanging mileage: ", error);
+                showToast("🚫 환전 처리 중 오류가 발생했습니다. 다시 시도해 주세요.", "danger");
+            } finally {
+                if (exchangeBtn) exchangeBtn.disabled = false;
+                hideSpinner();
+            }
         }
 
         // --- 학생용 마일리지 장부 내역 토글 및 렌더링 ---
@@ -5349,7 +5985,7 @@
         }
 
         // 아이템 사용 요청
-        function handleRequestUseItem(inventoryId) {
+        async function handleRequestUseItem(inventoryId) {
             const db = getDB();
             const inv = db.inventory.find(i => i.id === inventoryId && i.studentId === currentUser.id);
             if (!inv) {
@@ -5367,34 +6003,47 @@
                 return;
             }
 
-            const reqId = "req_use_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
-            db.useRequests.push({
-                id: reqId,
-                studentId: currentUser.id,
-                studentName: student.name,
-                productId: inv.productId,
-                inventoryId: inv.id,
-                productName: prod.name,
-                emoji: prod.emoji || (prod.category === 'coupon' ? '🎫' : '🍪'),
-                category: prod.category,
-                status: "pending",
-                date: new Date().toISOString()
-            });
+            showSpinner("사용 요청을 전송하는 중입니다...");
 
-            saveDB(db);
-            showToast(`⏳ ${prod.name} 사용 요청이 등록되었습니다. 교사의 승인 후 사용 처리됩니다.`, "warning");
-            loadTabData("shop");
+            try {
+                const reqId = "req_use_" + Date.now() + "_" + Math.random().toString(36).substr(2, 5);
+                await fs.collection("shop_orders").doc(reqId).set({
+                    id: reqId,
+                    type: "use_request",
+                    studentId: currentUser.id,
+                    studentName: student.name,
+                    productId: inv.productId,
+                    inventoryId: inv.id,
+                    productName: prod.name,
+                    emoji: prod.emoji || (prod.category === 'coupon' ? '🎫' : '🍪'),
+                    category: prod.category,
+                    status: "pending",
+                    date: new Date().toISOString()
+                });
+                showToast(`⏳ ${prod.name} 사용 요청이 등록되었습니다. 교사의 승인 후 사용 처리됩니다.`, "warning");
+            } catch (error) {
+                console.error("Error requesting use item: ", error);
+                showToast("🚫 사용 요청 중 오류가 발생했습니다. 다시 시도해 주세요.", "danger");
+            } finally {
+                hideSpinner();
+            }
         }
 
         // 아이템 사용 요청 취소
-        function handleCancelUseRequest(inventoryId) {
+        async function handleCancelUseRequest(inventoryId) {
             const db = getDB();
-            const reqIdx = db.useRequests.findIndex(r => r.studentId === currentUser.id && r.inventoryId === inventoryId && r.status === 'pending');
-            if (reqIdx > -1) {
-                db.useRequests.splice(reqIdx, 1);
-                saveDB(db);
-                showToast("사용 요청이 취소되었습니다.", "success");
-                loadTabData("shop");
+            const req = db.useRequests.find(r => r.studentId === currentUser.id && r.inventoryId === inventoryId && r.status === 'pending');
+            if (req) {
+                showSpinner("사용 요청을 취소하는 중입니다...");
+                try {
+                    await fs.collection("shop_orders").doc(req.id).delete();
+                    showToast("사용 요청이 취소되었습니다.", "success");
+                } catch (error) {
+                    console.error("Error cancelling use request: ", error);
+                    showToast("🚫 취소 중 오류가 발생했습니다. 다시 시도해 주세요.", "danger");
+                } finally {
+                    hideSpinner();
+                }
             }
         }
 
@@ -5736,17 +6385,224 @@
         window.handleSaveCurrencyName = handleSaveCurrencyName;
         window.getCurrencyName = getCurrencyName;
         window.renderStudentBalanceDisplay = renderStudentBalanceDisplay;
+        window.handleResetStudentPassword = handleResetStudentPassword;
+        window.openTeacherStudentEditModal = openTeacherStudentEditModal;
+        window.closeTeacherStudentEditModal = closeTeacherStudentEditModal;
+        window.handleTeacherStudentEditSubmit = handleTeacherStudentEditSubmit;
+        window.handleTeacherStudentDelete = handleTeacherStudentDelete;
+        window.handleManualMileageAward = handleManualMileageAward;
 
         function handleResetStudentPassword(studentId) {
             if (confirm("해당 학생의 비밀번호를 '1234'로 초기화하시겠습니까?")) {
                 const db = getDB();
                 const student = db.students.find(s => s.id === studentId);
                 if (student) {
-                    student.password = "1234";
-                    saveDB(db);
-                    showToast(`${student.name} 학생의 비밀번호가 초기화되었습니다.`, "success");
-                    renderTeacherManageTab(db);
+                    // 비번초기화도 Firestore 연동을 통해 확실하게 업데이트합니다.
+                    showSpinner("비밀번호를 초기화하는 중...");
+                    fs.collection("users").doc(studentId).update({
+                        password: "1234"
+                    }).then(() => {
+                        showToast(`${student.name} 학생의 비밀번호가 '1234'로 초기화되었습니다.`, "success");
+                    }).catch(err => {
+                        console.error("비밀번호 초기화 실패:", err);
+                        alert("비밀번호 초기화에 실패했습니다: " + err.message);
+                    }).finally(() => {
+                        hideSpinner();
+                    });
                 }
+            }
+        }
+
+        // 교사용 학생 수정 모달 열기
+        function openTeacherStudentEditModal(studentId) {
+            const db = getDB();
+            const student = db.students.find(s => s.id === studentId);
+            if (!student) {
+                alert("학생 정보를 찾을 수 없습니다.");
+                return;
+            }
+
+            window.editingStudentId = studentId;
+
+            // 모달 필드에 값 할당
+            document.getElementById('edit-student-id').value = student.id;
+            document.getElementById('edit-student-name').value = student.name || '';
+            document.getElementById('edit-student-pw').value = student.password || '';
+            document.getElementById('edit-student-balance').value = student.balance || 0;
+            document.getElementById('edit-student-mileage').value = student.mileageBalance !== undefined ? student.mileageBalance : (student.mileage || 0);
+
+            // 모달 표시
+            const modal = document.getElementById('teacher-student-edit-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+        }
+
+        // 교사용 학생 수정 모달 닫기
+        function closeTeacherStudentEditModal() {
+            window.editingStudentId = null;
+            const modal = document.getElementById('teacher-student-edit-modal');
+            if (modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // 교사용 학생 수정 저장
+        async function handleTeacherStudentEditSubmit() {
+            const studentId = window.editingStudentId;
+            if (!studentId) {
+                alert("수정할 학생 대상이 지정되지 않았습니다.");
+                return;
+            }
+
+            const name = document.getElementById('edit-student-name').value.trim();
+            const password = document.getElementById('edit-student-pw').value.trim();
+            const balanceVal = document.getElementById('edit-student-balance').value.trim();
+            const mileageVal = document.getElementById('edit-student-mileage').value.trim();
+
+            if (!name) {
+                alert("이름을 입력해 주세요.");
+                return;
+            }
+            if (!password) {
+                alert("비밀번호를 입력해 주세요.");
+                return;
+            }
+
+            const balance = parseInt(balanceVal, 10);
+            const mileage = parseInt(mileageVal, 10);
+
+            if (isNaN(balance)) {
+                alert("올바른 잔액(숫자)을 입력해 주세요.");
+                return;
+            }
+            if (isNaN(mileage)) {
+                alert("올바른 마일리지(숫자)를 입력해 주세요.");
+                return;
+            }
+
+            showSpinner("학생 정보를 수정하는 중...");
+
+            try {
+                // Firestore users 컬렉션에서 해당 학생 문서 업데이트
+                const studentRef = fs.collection("users").doc(studentId);
+                await studentRef.update({
+                    name: name,
+                    password: password,
+                    balance: balance,
+                    mileage: mileage,
+                    mileageBalance: mileage
+                });
+
+                showToast(`✅ ${name} 학생의 계정이 성공적으로 수정되었습니다!`, "success");
+                closeTeacherStudentEditModal();
+            } catch (err) {
+                console.error("학생 계정 수정 중 에러 발생: ", err);
+                alert("학생 계정 수정에 실패했습니다. (에러: " + err.message + ")");
+            } finally {
+                hideSpinner();
+            }
+        }
+
+        // 교사용 학생 계정 삭제
+        async function handleTeacherStudentDelete(studentId) {
+            const db = getDB();
+            const student = db.students.find(s => s.id === studentId);
+            const name = student ? student.name : studentId;
+
+            const confirmMsg = `⚠️ 이 학생(${name})의 계정을 삭제하면 통장 잔고와 모든 금융/환경 기록이 파이어베이스에서 영구 삭제됩니다. 정말 삭제하시겠습니까?`;
+            if (!confirm(confirmMsg)) {
+                return;
+            }
+
+            showSpinner("학생 계정을 삭제하는 중...");
+
+            try {
+                // Firestore users 컬렉션에서 해당 학생 문서 삭제
+                const studentRef = fs.collection("users").doc(studentId);
+                await studentRef.delete();
+
+                showToast(`✅ ${name} 학생의 계정이 성공적으로 삭제되었습니다!`, "success");
+            } catch (err) {
+                console.error("학생 계정 삭제 중 에러 발생: ", err);
+                alert("학생 계정 삭제에 실패했습니다. (에러: " + err.message + ")");
+            } finally {
+                hideSpinner();
+            }
+        }
+
+        // 교사용 개별 환경 마일리지 직접 지급
+        async function handleManualMileageAward() {
+            const studentId = document.getElementById('manual-mileage-student-select').value;
+            const description = document.getElementById('manual-mileage-description').value.trim();
+            const amountVal = document.getElementById('manual-mileage-amount').value.trim();
+
+            if (!studentId) {
+                alert("지급할 학생을 선택해 주세요.");
+                return;
+            }
+            if (!description) {
+                alert("실천 항목(지급 사유)을 입력해 주세요.");
+                return;
+            }
+            if (!amountVal) {
+                alert("지급할 마일리지 점수를 입력해 주세요.");
+                return;
+            }
+
+            const amount = parseInt(amountVal, 10);
+            if (isNaN(amount) || amount <= 0) {
+                alert("올바른 점수(1 이상의 정수)를 입력해 주세요.");
+                return;
+            }
+
+            const db = getDB();
+            const student = db.students.find(s => s.id === studentId);
+            if (!student) {
+                alert("해당 학생을 찾을 수 없습니다.");
+                return;
+            }
+
+            showSpinner("환경 마일리지를 개별 지급하는 중...");
+
+            try {
+                const batch = fs.batch();
+                const studentRef = fs.collection("users").doc(studentId);
+
+                // 1. 학생 마일리지 누적 (increment)
+                batch.update(studentRef, {
+                    mileage: firebase.firestore.FieldValue.increment(amount),
+                    mileageBalance: firebase.firestore.FieldValue.increment(amount)
+                });
+
+                // 2. env_mileage_ledger에 내역 기록
+                const emlId = "eml_manual_" + Date.now();
+                const emlRef = fs.collection("env_mileage_ledger").doc(emlId);
+                batch.set(emlRef, {
+                    id: emlId,
+                    studentId: studentId,
+                    studentName: student.name,
+                    date: new Date().toISOString(),
+                    type: "manual",
+                    description: `🌿 교사 직접 지급: ${description}`,
+                    amount: amount
+                });
+
+                await batch.commit();
+
+                showToast(`✅ ${student.name} 학생에게 환경 마일리지 ${amount}점이 지급되었습니다!`, "success");
+                alert(`지급 완료! (${student.name} 학생에게 ${amount}점 지급)`);
+
+                // 인풋 폼 리셋
+                document.getElementById('manual-mileage-student-select').value = "";
+                document.getElementById('manual-mileage-description').value = "";
+                document.getElementById('manual-mileage-amount').value = "";
+
+            } catch (error) {
+                console.error("수동 마일리지 지급 중 오류 발생: ", error);
+                alert("마일리지 지급에 실패했습니다: " + error.message);
+            } finally {
+                hideSpinner();
             }
         }
 
