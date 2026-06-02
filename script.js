@@ -134,10 +134,6 @@
                 });
                 db.students = students.filter(s => s.id !== "teacher");
                 initialLoadState.users = true;
-
-                // 마일리지 직접 지급용 드롭다운 실시간 연동
-                updateMileageStudentSelect(db.students);
-
                 onDBChange("users");
                 checkAllLoaded();
             }, err => onError("users", err));
@@ -1543,22 +1539,19 @@
                 const stuTbody = document.getElementById('teacher-student-management-tbody');
                 if (!stuTbody) return;
                 stuTbody.innerHTML = "";
-                db.students.forEach((student, index) => {
+                db.students.forEach(student => {
                     const tr = document.createElement('tr');
                     const isChecked = student.isFrozen ? "checked" : "";
-                    const mileage = student.mileageBalance !== undefined ? student.mileageBalance : (student.mileage || 0);
                     tr.innerHTML = `
-                        <td>${index + 1}</td>
                         <td><strong>${student.name}</strong></td>
                         <td><code>${student.id}</code></td>
-                        <td><code>${student.password || ''}</code></td>
+                        <td><span class="role-badge" style="background:#ffc078; color:var(--text-main); font-size:0.75rem; font-weight:bold;">${student.job || '무직'}</span></td>
                         <td style="font-weight:bold; color:#d9480f;">${(student.balance || 0).toLocaleString()} ${getCurrencyName()}</td>
-                        <td style="font-weight:bold; color:#0b7285;">${mileage} 점</td>
                         <td>
                             <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                <button class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" onclick="editStudent('${student.id}')">✏️ 수정</button>
-                                <button class="btn btn-danger" style="font-size:0.75rem; padding:4px 8px;" onclick="deleteStudent('${student.id}')">❌ 삭제</button>
                                 <button class="btn btn-primary" style="font-size:0.75rem; padding:4px 8px;" onclick="handleViewStudentDetail('${student.id}')">🔍 상세조회 & 롤백</button>
+                                <button class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" onclick="openTeacherStudentEditModal('${student.id}')">✏️ 수정</button>
+                                <button class="btn btn-danger" style="font-size:0.75rem; padding:4px 8px;" onclick="handleTeacherStudentDelete('${student.id}')">❌ 삭제</button>
                                 <button class="btn btn-warning" style="font-size:0.75rem; padding:4px 8px;" onclick="handleResetStudentPassword('${student.id}')">🔑 비번초기화</button>
                                 <label class="switch">
                                     <input type="checkbox" ${isChecked} onchange="toggleStudentFreeze('${student.id}', this.checked)">
@@ -4266,7 +4259,7 @@
             }
         }
 
-        // 교사용 일별 환경 실천 출석 테이블 렌더링 (Override 데이터 반영) - 가로형 카드 개편
+        // 교사용 일별 환경 실천 출석 테이블 렌더링 (Override 데이터 반영)
         function renderTeacherEnvAttendanceTable(db, selectedDate) {
             const attTbody = document.getElementById('teacher-env-attendance-tbody');
             if (!attTbody) return;
@@ -4284,27 +4277,18 @@
                 const plateChecked = record ? record.plate : false;
                 const handChecked = record ? record.handkerchief : false;
 
-                const card = document.createElement('div');
-                card.className = 'teacher-env-card';
-                card.innerHTML = `
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; box-sizing: border-box;">
-                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: bold; flex-shrink: 0; min-width: 80px;">
-                            <input type="checkbox" class="env-row-select" data-student-id="${st.id}" style="transform: scale(1.1); cursor: pointer;" onchange="syncAllCheckState()">
-                            <span style="font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${st.name} (${st.id})">${st.name}</span>
-                        </label>
-                        <div style="display: flex; gap: 6px; align-items: center; flex-grow: 1; justify-content: flex-end;">
-                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.8rem; background: var(--background); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color); white-space: nowrap;">
-                                <input type="checkbox" class="env-chk-handkerchief" data-student-id="${st.id}" ${handChecked ? 'checked' : ''} style="transform: scale(1.1); cursor: pointer;">
-                                <span>🌿 손수건</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 0.8rem; background: var(--background); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color); white-space: nowrap;">
-                                <input type="checkbox" class="env-chk-plate" data-student-id="${st.id}" ${plateChecked ? 'checked' : ''} style="transform: scale(1.1); cursor: pointer;">
-                                <span>🍱 급식</span>
-                            </label>
-                        </div>
-                    </div>
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td style="text-align:center;"><input type="checkbox" class="env-row-select" style="transform:scale(1.2); cursor:pointer;" onchange="syncAllCheckState()"></td>
+                    <td><strong>${st.name} (${st.id})</strong></td>
+                    <td style="text-align: center;">
+                        <input type="checkbox" class="env-chk-plate" data-student-id="${st.id}" ${plateChecked ? 'checked' : ''} style="transform: scale(1.3); cursor: pointer;">
+                    </td>
+                    <td style="text-align: center;">
+                        <input type="checkbox" class="env-chk-handkerchief" data-student-id="${st.id}" ${handChecked ? 'checked' : ''} style="transform: scale(1.3); cursor: pointer;">
+                    </td>
                 `;
-                attTbody.appendChild(card);
+                attTbody.appendChild(tr);
             });
 
             // 안내 메시지 동적 업데이트
@@ -4505,11 +4489,10 @@
             let totalDistributed = 0;
             const newRecords = [];
 
-            plateCheckboxes.forEach((chk) => {
+            plateCheckboxes.forEach((chk, idx) => {
                 const studentId = chk.getAttribute('data-student-id');
                 const plateChecked = chk.checked;
-                const handChk = document.querySelector(`.env-chk-handkerchief[data-student-id="${studentId}"]`);
-                const handChecked = handChk ? handChk.checked : false;
+                const handChecked = handkerchiefCheckboxes[idx] ? handkerchiefCheckboxes[idx].checked : false;
 
                 if (plateChecked || handChecked) {
                     const student = db.students.find(s => s.id === studentId);
@@ -5356,12 +5339,12 @@
             if (!allChk || rows.length === 0) return;
             const allChecked = [...rows].every(el => el.checked);
             allChk.checked = allChecked;
-            // 행 선택 체크박스 변경 시 해당 카드의 plate/handkerchief도 동기화
+            // 행 선택 체크박스 변경 시 해당 행의 plate/handkerchief도 동기화
             rows.forEach(rowChk => {
-                const card = rowChk.closest('.teacher-env-card');
-                if (card) {
-                    const plate = card.querySelector('.env-chk-plate');
-                    const hand  = card.querySelector('.env-chk-handkerchief');
+                const tr = rowChk.closest('tr');
+                if (tr) {
+                    const plate = tr.querySelector('.env-chk-plate');
+                    const hand  = tr.querySelector('.env-chk-handkerchief');
                     if (plate) plate.checked = rowChk.checked;
                     if (hand)  hand.checked  = rowChk.checked;
                 }
@@ -6412,9 +6395,6 @@
         window.handleTeacherStudentEditSubmit = handleTeacherStudentEditSubmit;
         window.handleTeacherStudentDelete = handleTeacherStudentDelete;
         window.handleManualMileageAward = handleManualMileageAward;
-        window.deleteStudent = deleteStudent;
-        window.editStudent = editStudent;
-        window.updateMileageStudentSelect = updateMileageStudentSelect;
 
         function handleResetStudentPassword(studentId) {
             if (confirm("해당 학생의 비밀번호를 '1234'로 초기화하시겠습니까?")) {
@@ -6429,7 +6409,7 @@
                         showToast(`${student.name} 학생의 비밀번호가 '1234'로 초기화되었습니다.`, "success");
                     }).catch(err => {
                         console.error("비밀번호 초기화 실패:", err);
-                        alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
+                        alert("비밀번호 초기화에 실패했습니다: " + err.message);
                     }).finally(() => {
                         hideSpinner();
                     });
@@ -6469,11 +6449,6 @@
             if (modal) {
                 modal.style.display = 'none';
             }
-        }
-
-        // 교사용 학생 수정 단축 링크 함수
-        function editStudent(studentId) {
-            openTeacherStudentEditModal(studentId);
         }
 
         // 교사용 학생 수정 저장
@@ -6526,7 +6501,7 @@
                 showToast(`✅ ${name} 학생의 계정이 성공적으로 수정되었습니다!`, "success");
                 closeTeacherStudentEditModal();
             } catch (err) {
-                console.error("학생 정보 수정 에러: ", err);
+                console.error(err);
                 alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
             } finally {
                 hideSpinner();
@@ -6534,7 +6509,7 @@
         }
 
         // 교사용 학생 계정 삭제
-        async function deleteStudent(studentId) {
+        async function handleTeacherStudentDelete(studentId) {
             const db = getDB();
             const student = db.students.find(s => s.id === studentId);
             const name = student ? student.name : studentId;
@@ -6553,35 +6528,16 @@
 
                 showToast(`✅ ${name} 학생의 계정이 성공적으로 삭제되었습니다!`, "success");
             } catch (err) {
-                console.error("학생 계정 삭제 에러: ", err);
+                console.error(err);
                 alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
             } finally {
                 hideSpinner();
             }
         }
 
-        // 기존 삭제 핸들러 호환용
-        function handleTeacherStudentDelete(studentId) {
-            deleteStudent(studentId);
-        }
-
-        // 마일리지 직접 지급 드롭다운 동적 업데이트 함수
-        function updateMileageStudentSelect(students) {
-            const select = document.getElementById('mileage-student-select');
-            if (!select) return;
-            // 중복 방지 초기화
-            select.innerHTML = '<option value="">지급할 학생 선택</option>';
-            students.forEach(st => {
-                const opt = document.createElement('option');
-                opt.value = st.id;
-                opt.innerText = `${st.name} (${st.id})`;
-                select.appendChild(opt);
-            });
-        }
-
         // 교사용 개별 환경 마일리지 직접 지급
         async function handleManualMileageAward() {
-            const studentId = document.getElementById('mileage-student-select').value;
+            const studentId = document.getElementById('manual-mileage-student-select').value;
             const description = document.getElementById('manual-mileage-description').value.trim();
             const amountVal = document.getElementById('manual-mileage-amount').value.trim();
 
@@ -6642,7 +6598,7 @@
                 alert(`지급 완료! (${student.name} 학생에게 ${amount}점 지급)`);
 
                 // 인풋 폼 리셋
-                document.getElementById('mileage-student-select').value = "";
+                document.getElementById('manual-mileage-student-select').value = "";
                 document.getElementById('manual-mileage-description').value = "";
                 document.getElementById('manual-mileage-amount').value = "";
 
@@ -6653,6 +6609,8 @@
                 hideSpinner();
             }
         }
+
+
 
         // 다른 브라우저 탭/창과의 실시간 데이터 변경 감지 및 연동
         window.addEventListener('storage', function(e) {
