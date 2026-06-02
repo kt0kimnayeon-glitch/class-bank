@@ -126,7 +126,11 @@
             fs.collection("users").onSnapshot(snapshot => {
                 const students = [];
                 snapshot.forEach(doc => {
-                    students.push(doc.data());
+                    const sData = doc.data();
+                    students.push({
+                        ...sData,
+                        id: doc.id // Firestore 문서 ID를 id 필드로 바인딩
+                    });
                 });
                 db.students = students.filter(s => s.id !== "teacher");
                 initialLoadState.users = true;
@@ -6497,8 +6501,8 @@
                 showToast(`✅ ${name} 학생의 계정이 성공적으로 수정되었습니다!`, "success");
                 closeTeacherStudentEditModal();
             } catch (err) {
-                console.error("학생 계정 수정 중 에러 발생: ", err);
-                alert("학생 계정 수정에 실패했습니다. (에러: " + err.message + ")");
+                console.error(err);
+                alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
             } finally {
                 hideSpinner();
             }
@@ -6524,8 +6528,8 @@
 
                 showToast(`✅ ${name} 학생의 계정이 성공적으로 삭제되었습니다!`, "success");
             } catch (err) {
-                console.error("학생 계정 삭제 중 에러 발생: ", err);
-                alert("학생 계정 삭제에 실패했습니다. (에러: " + err.message + ")");
+                console.error(err);
+                alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
             } finally {
                 hideSpinner();
             }
