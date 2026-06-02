@@ -1007,3 +1007,31 @@
             border-color: #212529;
             box-shadow: 0 0 6px rgba(0,0,0,0.2);
         }
+
+        /* 교사용 환경 정산용 가로형 Grid & Card */
+        .teacher-env-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 12px;
+            width: 100%;
+            box-sizing: border-box;
+            margin-bottom: 15px;
+        }
+
+        .teacher-env-card {
+            background: var(--card-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.01);
+            transition: all 0.2s ease;
+        }
+
+        .teacher-env-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.02);
+        }
