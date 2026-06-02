@@ -772,6 +772,7 @@
         let activeTab = "bankbook";
         let tempCSVData = []; // CSV 업로드용 임시 공간
         let editingOriginalJobName = null; // 직업 수정용 임시 공간
+let editingStudentId = null; // 학생 수정용 임시 공간
 
         let isInitialLoadComplete = false;
         const initialLoadState = {
@@ -1399,10 +1400,11 @@
             document.getElementById('new-student-preview').style.display = 'none';
         }
 
-        // 학생 계정 생성 함수
+        // 학생 계정 생성 및 편집 함수
         function handleCreateStudent() {
             const name = document.getElementById('new-student-name').value.trim();
-            const newId = document.getElementById('new-student-id').value.trim();
+            const idField = document.getElementById('new-student-id');
+            const newId = idField.value.trim();
             const pw = document.getElementById('new-student-pw').value.trim();
             const job = document.getElementById('new-student-job').value;
             const role = document.getElementById('new-student-role').value.trim();
@@ -1416,7 +1418,7 @@
             }
             if (!newId) {
                 showToast("로그인 아이디를 입력해 주세요.", "danger");
-                document.getElementById('new-student-id').focus();
+                idField.focus();
                 return;
             }
             if (!/^[a-zA-Z0-9_]+$/.test(newId)) {
@@ -1427,7 +1429,7 @@
                 showToast("'teacher'는 예약된 ID입니다. 다른 아이디를 사용해 주세요.", "danger");
                 return;
             }
-            if (!pw || pw.length < 1) {
+            if (!pw) {
                 showToast("비밀번호를 입력해 주세요.", "danger");
                 document.getElementById('new-student-pw').focus();
                 return;
@@ -1435,6 +1437,47 @@
 
             const db = getDB();
 
+            // 직업 객체 조회 (baseSalary 참조)
+            const jobObj = db.jobs.find(j => j.name === job);
+            const baseSalary = jobObj ? jobObj.baseSalary : 50;
+
+            if (editingStudentId) {
+                // === EDIT MODE ===
+                // Firestore 업데이트
+                fs.collection("users").doc(editingStudentId).update({
+                    name: name,
+                    password: pw,
+                    job: job,
+                    role: role,
+                    balance: balance,
+                    baseSalary: baseSalary
+                }).then(() => {
+                    // 로컬 DB 동기화
+                    const stu = db.students.find(s => s.id === editingStudentId);
+                    if (stu) {
+                        stu.name = name;
+                        stu.password = pw;
+                        stu.job = job;
+                        stu.role = role;
+                        stu.balance = balance;
+                        stu.baseSalary = baseSalary;
+                    }
+                    saveDB(db);
+                    showToast(`✅ 학생 계정(ID: ${editingStudentId})이 성공적으로 수정되었습니다!`, "success");
+                    // UI 초기화
+                    resetNewStudentForm();
+                    editingStudentId = null;
+                    const btn = document.getElementById('btn-create-student');
+                    if (btn) btn.innerHTML = '생성';
+                    renderTeacherManageTab(db);
+                }).catch(err => {
+                    console.error("학생 수정 실패:", err);
+                    alert("학생 정보 수정에 실패했습니다. 보안 규칙을 확인하세요.");
+                });
+                return;
+            }
+
+            // === CREATE MODE ===
             // 중복 ID 검사
             const existing = db.students.find(s => s.id === newId);
             if (existing) {
@@ -1442,11 +1485,6 @@
                 return;
             }
 
-            // 직업 객체 조회 (baseSalary 참조)
-            const jobObj = db.jobs.find(j => j.name === job);
-            const baseSalary = jobObj ? jobObj.baseSalary : 50;
-
-            // 새 학생 객체 생성
             const newStudent = {
                 id: newId,
                 name: name,
@@ -1461,10 +1499,8 @@
                 avatar: { emoji: "👶", bgColor: "#ffe3e3" }
             };
 
-            // DB에 추가 및 저장
             db.students.push(newStudent);
 
-            // 초기 잔액이 있는 경우 거래내역 추가
             if (balance > 0) {
                 db.transactions.push({
                     id: "tx_init_" + Date.now() + "_" + newId,
@@ -1479,14 +1515,10 @@
             }
 
             saveDB(db);
-
             showToast(`✅ ${name} 학생 계정(ID: ${newId})이 성공적으로 생성되었습니다!`, "success");
-
-            // 폼 초기화 및 목록 갱신
             resetNewStudentForm();
             renderTeacherManageTab(db);
 
-            // 생성 버튼 시각적 피드백
             const btn = document.getElementById('btn-create-student');
             if (btn) {
                 const origText = btn.innerHTML;
@@ -1498,6 +1530,27 @@
                 }, 2000);
             }
         }
+
+        // 편집 버튼 클릭 시 호출되는 함수
+        function editStudent(studentId) {
+            const db = getDB();
+            const student = db.students.find(s => s.id === studentId);
+            if (!student) return;
+            // 폼에 데이터 바인딩
+            document.getElementById('new-student-name').value = student.name || '';
+            document.getElementById('new-student-id').value = student.id || '';
+            document.getElementById('new-student-id').disabled = true; // ID는 변경 불가
+            document.getElementById('new-student-pw').value = student.password || '';
+            document.getElementById('new-student-job').value = student.job || '무직';
+            document.getElementById('new-student-role').value = student.role || '';
+            document.getElementById('new-student-balance').value = student.balance || 0;
+            // 편집 모드 플래그 설정
+            editingStudentId = studentId;
+            // 버튼 텍스트 변경
+            const btn = document.getElementById('btn-create-student');
+            if (btn) btn.innerHTML = '수정 저장';
+        }
+
 
         // ==========================================
         // SUB-TABS NAVIGATION IN MANAGE SECTION
@@ -1538,33 +1591,46 @@
                     });
                 }
 
-                // 계정 관리: 학생 명단 테이블 렌더링
-
+                // 계정 관리: 잔액 & 마일리지 직접 관리 테이블 렌더링
                 const stuTbody = document.getElementById('teacher-student-management-tbody');
                 if (!stuTbody) return;
                 stuTbody.innerHTML = "";
-                db.students.forEach((student, index) => {
-                    const tr = document.createElement('tr');
-                    const isChecked = student.isFrozen ? "checked" : "";
+                db.students.forEach((student) => {
                     const mileage = student.mileageBalance !== undefined ? student.mileageBalance : (student.mileage || 0);
+                    const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td>${index + 1}</td>
-                        <td><strong>${student.name}</strong></td>
-                        <td><code>${student.id}</code></td>
-                        <td><code>${student.password || ''}</code></td>
+                        <td><strong>${student.name}</strong><br><code style="font-size:0.72rem;color:#868e96;">${student.id}</code></td>
                         <td style="font-weight:bold; color:#d9480f;">${(student.balance || 0).toLocaleString()} ${getCurrencyName()}</td>
                         <td style="font-weight:bold; color:#0b7285;">${mileage} 점</td>
                         <td>
-                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                <button class="btn btn-secondary" style="font-size:0.75rem; padding:4px 8px;" onclick="editStudent('${student.id}')">✏️ 수정</button>
-                                <button class="btn btn-danger" style="font-size:0.75rem; padding:4px 8px;" onclick="deleteStudent('${student.id}')">❌ 삭제</button>
-                                <button class="btn btn-primary" style="font-size:0.75rem; padding:4px 8px;" onclick="handleViewStudentDetail('${student.id}')">🔍 상세조회 & 롤백</button>
-                                <button class="btn btn-warning" style="font-size:0.75rem; padding:4px 8px;" onclick="handleResetStudentPassword('${student.id}')">🔑 비번초기화</button>
-                                <label class="switch">
-                                    <input type="checkbox" ${isChecked} onchange="toggleStudentFreeze('${student.id}', this.checked)">
+                            <input type="number" id="inp-bal-${student.id}"
+                                placeholder="${(student.balance || 0).toLocaleString()}"
+                                style="width:100%; padding:5px 7px; border:1px solid #ced4da; border-radius:6px; font-size:0.88rem; box-sizing:border-box;">
+                        </td>
+                        <td>
+                            <input type="number" id="inp-mil-${student.id}"
+                                placeholder="${mileage}"
+                                style="width:100%; padding:5px 7px; border:1px solid #ced4da; border-radius:6px; font-size:0.88rem; box-sizing:border-box;">
+                        </td>
+                        <td>
+                            <input type="text" id="inp-reason-${student.id}"
+                                placeholder="예: 우수 발표 보상"
+                                style="width:100%; padding:5px 7px; border:1px solid #ced4da; border-radius:6px; font-size:0.88rem; box-sizing:border-box;">
+                        </td>
+                        <td>
+                            <button class="btn btn-success" style="font-size:0.75rem; padding:5px 10px; white-space:nowrap;"
+                                onclick="applyBalanceChange('${student.id}')">✅ 적용</button>
+                        </td>
+                        <td>
+                            <div style="display:flex; flex-direction:column; gap:4px;">
+                                <button class="btn btn-primary" style="font-size:0.72rem; padding:3px 7px;" onclick="handleViewStudentDetail('${student.id}')">🔍 통장내역</button>
+                                <button class="btn btn-warning" style="font-size:0.72rem; padding:3px 7px;" onclick="handleResetStudentPassword('${student.id}')">🔑 비번초기화</button>
+                                <button class="btn btn-danger" style="font-size:0.72rem; padding:3px 7px;" onclick="deleteStudent('${student.id}')">🗑 삭제</button>
+                                <label class="switch" style="margin-top:2px;">
+                                    <input type="checkbox" ${student.isFrozen ? 'checked' : ''} onchange="toggleStudentFreeze('${student.id}', this.checked)">
                                     <span class="slider"></span>
                                 </label>
-                                <span style="font-size:0.75rem; font-weight:bold; color:var(--accent);">동결</span>
+                                <span style="font-size:0.7rem; color:var(--accent); font-weight:bold;">동결</span>
                             </div>
                         </td>
                     `;
@@ -1581,10 +1647,13 @@
                             <td><strong>${job.name}</strong></td>
                             <td>${(job.baseSalary || 0).toLocaleString()} ${getCurrencyName()}</td>
                             <td>
-                                <button class="btn btn-primary" style="font-size:0.7rem; padding:4px 8px;" onclick="handleEditJob('${job.name}')">수정</button>
-                                <button class="btn btn-danger" style="font-size:0.7rem; padding:4px 8px; margin-left:4px;" onclick="handleDeleteJob('${job.name}')">삭제</button>
+                                <button class="btn btn-primary btn-edit-job" style="font-size:0.7rem; padding:4px 8px;">수정</button>
+                                <button class="btn btn-danger btn-delete-job" style="font-size:0.7rem; padding:4px 8px; margin-left:4px;">삭제</button>
                             </td>
                         `;
+                        // 안전한 클로저 기반 이벤트 리스너 바인딩
+                        tr.querySelector('.btn-edit-job').addEventListener('click', () => handleEditJob(job.name));
+                        tr.querySelector('.btn-delete-job').addEventListener('click', () => handleDeleteJob(job.name));
                         jobsTbody.appendChild(tr);
                     });
                 }
@@ -1648,8 +1717,8 @@
             salaryInput.value = baseSalary;
         }
 
-        // 학생 개별 직업/역할/기본급 설정 저장
-        function handleSaveStudentJob(studentId) {
+        // 학생 개별 직업/역할/기본급 설정 저장 (비동기 Firestore 연동)
+        async function handleSaveStudentJob(studentId) {
             const db = getDB();
             const jobSelect = document.getElementById(`st-job-${studentId}`);
             const roleInput = document.getElementById(`st-role-${studentId}`);
@@ -1659,17 +1728,28 @@
 
             if (!jobSelect || !roleInput || !salaryInput || !handCheckbox || !mealCheckbox) return;
 
-            const studentIndex = db.students.findIndex(s => s.id === studentId);
-            if (studentIndex > -1) {
-                db.students[studentIndex].job = jobSelect.value;
-                db.students[studentIndex].role = roleInput.value.trim();
-                db.students[studentIndex].baseSalary = parseInt(salaryInput.value) || 0;
-                db.students[studentIndex].isHandkerchiefManager = handCheckbox.checked;
-                db.students[studentIndex].isMealManager = mealCheckbox.checked;
-                
-                saveDB(db);
-                showToast(`${db.students[studentIndex].name} 학생의 직업 정보 및 권한이 저장되었습니다.`, "success");
-                renderTeacherManageTab(db);
+            showSpinner("학생 직업 정보를 수정하는 중...");
+            try {
+                const jobVal = jobSelect.value;
+                const roleVal = roleInput.value.trim();
+                const salaryVal = parseInt(salaryInput.value) || 0;
+                const isHand = handCheckbox.checked;
+                const isMeal = mealCheckbox.checked;
+
+                await fs.collection("users").doc(studentId).update({
+                    job: jobVal,
+                    role: roleVal,
+                    baseSalary: salaryVal,
+                    isHandkerchiefManager: isHand,
+                    isMealManager: isMeal
+                });
+
+                showToast("학생의 직업 정보 및 권한이 클라우드에 성공적으로 저장되었습니다.", "success");
+            } catch (err) {
+                console.error("학생 직업 저장 실패:", err);
+                alert("학생 직업 정보 처리에 실패했습니다. 보안 규칙을 확인하세요.");
+            } finally {
+                hideSpinner();
             }
         }
 
@@ -1809,7 +1889,7 @@
         }
 
         // 직업 저장
-        function handleSaveJob() {
+        async function handleSaveJob() {
             const name = document.getElementById('job-name-input').value.trim();
             const salary = parseInt(document.getElementById('job-salary-input').value);
 
@@ -1819,50 +1899,82 @@
             }
 
             const db = getDB();
-            
-            if (editingOriginalJobName) {
-                // 수정 모드
-                const origName = editingOriginalJobName;
-                
-                // 중복 체크 (원래 이름과 다른 이름으로 바꿀 때만)
-                if (origName !== name) {
-                    const isDup = db.jobs.some(j => j.name === name);
-                    if (isDup) {
-                        showToast("이미 존재하는 직업명입니다.", "danger");
-                        return;
+            showSpinner("직업 정보를 저장하는 중...");
+
+            try {
+                if (editingOriginalJobName) {
+                    // 수정 모드
+                    const origName = editingOriginalJobName;
+                    
+                    // 중복 체크 (원래 이름과 다른 이름으로 바꿀 때만)
+                    if (origName !== name) {
+                        const isDup = db.jobs.some(j => j.name === name);
+                        if (isDup) {
+                            showToast("이미 존재하는 직업명입니다.", "danger");
+                            hideSpinner();
+                            return;
+                        }
+
+                        const batch = fs.batch();
+                        // 기존 문서 삭제 후 새 문서 추가
+                        batch.delete(fs.collection("jobs").doc(origName));
+                        batch.set(fs.collection("jobs").doc(name), { name, baseSalary: salary });
+
+                        // 해당 직업 가졌던 학생들 정보 업데이트
+                        const studentsToUpdate = db.students.filter(st => st.job === origName);
+                        studentsToUpdate.forEach(st => {
+                            batch.update(fs.collection("users").doc(st.id), {
+                                job: name,
+                                baseSalary: salary
+                            });
+                        });
+
+                        await batch.commit();
+                        showToast(`💼 직업 정보가 수정되었습니다: ${origName} -> ${name} (${salary}치킨)`, "success");
+                    } else {
+                        // 직업명은 동일하고 급여만 수정
+                        const batch = fs.batch();
+                        batch.update(fs.collection("jobs").doc(name), { baseSalary: salary });
+
+                        const studentsToUpdate = db.students.filter(st => st.job === name);
+                        studentsToUpdate.forEach(st => {
+                            batch.update(fs.collection("users").doc(st.id), {
+                                baseSalary: salary
+                            });
+                        });
+
+                        await batch.commit();
+                        showToast(`💼 직업 급여 정보가 수정되었습니다: ${name} (${salary}치킨)`, "success");
+                    }
+                } else {
+                    // 추가 모드
+                    const jobIdx = db.jobs.findIndex(j => j.name === name);
+                    if (jobIdx > -1) {
+                        const batch = fs.batch();
+                        batch.update(fs.collection("jobs").doc(name), { baseSalary: salary });
+
+                        const studentsToUpdate = db.students.filter(st => st.job === name);
+                        studentsToUpdate.forEach(st => {
+                            batch.update(fs.collection("users").doc(st.id), {
+                                baseSalary: salary
+                            });
+                        });
+
+                        await batch.commit();
+                        showToast(`💼 기존 직업의 기본급이 변경되었습니다: ${name} (${salary}치킨)`, "success");
+                    } else {
+                        await fs.collection("jobs").doc(name).set({ name, baseSalary: salary });
+                        showToast(`💼 새 직업이 추가되었습니다: ${name} (${salary}치킨)`, "success");
                     }
                 }
 
-                const jobIdx = db.jobs.findIndex(j => j.name === origName);
-                if (jobIdx > -1) {
-                    db.jobs[jobIdx].name = name;
-                    db.jobs[jobIdx].baseSalary = salary;
-                    
-                    // 해당 직업 학생들 일괄 동기화
-                    db.students.forEach(st => {
-                        if (st.job === origName) {
-                            st.job = name;
-                            st.baseSalary = salary;
-                        }
-                    });
-                    showToast(`💼 직업 정보가 수정되었습니다: ${origName} -> ${name} (${salary}치킨)`, "success");
-                }
-            } else {
-                // 추가 모드
-                const jobIdx = db.jobs.findIndex(j => j.name === name);
-                if (jobIdx > -1) {
-                    db.jobs[jobIdx].baseSalary = salary;
-                    showToast(`💼 기존 직업의 기본급이 변경되었습니다: ${name} (${salary}치킨)`, "success");
-                } else {
-                    db.jobs.push({ name, baseSalary: salary });
-                    showToast(`💼 새 직업이 추가되었습니다: ${name} (${salary}치킨)`, "success");
-                }
+                handleResetJobForm();
+            } catch (err) {
+                console.error("직업 저장 실패:", err);
+                alert("직업 정보 처리에 실패했습니다. 보안 규칙을 확인하세요.");
+            } finally {
+                hideSpinner();
             }
-
-            saveDB(db);
-            handleResetJobForm();
-            loadTabData("salary");
-            renderTeacherManageTab(db);
         }
 
         // 직업 수정 폼 바인딩
@@ -1890,7 +2002,7 @@
         }
 
         // 직업 삭제
-        function handleDeleteJob(name) {
+        async function handleDeleteJob(name) {
             const db = getDB();
             
             const hasStudent = db.students.some(s => s.job === name);
@@ -1900,29 +2012,43 @@
                 if (!confirm(`정말 '${name}' 직업을 삭제하시겠습니까?`)) return;
             }
 
-            db.jobs = db.jobs.filter(j => j.name !== name);
-            
-            // 삭제한 직업을 가진 학생들은 '무직'으로 복귀 처리
-            db.students.forEach(st => {
-                if (st.job === name) {
-                    st.job = "무직";
-                    const noJobObj = db.jobs.find(j => j.name === "무직");
-                    st.baseSalary = noJobObj ? noJobObj.baseSalary : 50;
-                }
-            });
+            showSpinner("직업을 삭제하는 중...");
 
-            saveDB(db);
-            showToast(`직업 '${name}' 항목이 삭제되었으며, 해당 직업 학생들은 무직으로 연동되었습니다.`, "warning");
-            
-            if (editingOriginalJobName === name) {
-                handleResetJobForm();
+            try {
+                const batch = fs.batch();
+                batch.delete(fs.collection("jobs").doc(name));
+
+                const noJobObj = db.jobs.find(j => j.name === "무직");
+                const noJobSalary = noJobObj ? noJobObj.baseSalary : 50;
+
+                const studentsToReset = db.students.filter(st => st.job === name);
+                studentsToReset.forEach(st => {
+                    batch.update(fs.collection("users").doc(st.id), {
+                        job: "무직",
+                        baseSalary: noJobSalary
+                    });
+                });
+
+                await batch.commit();
+                showToast(`직업 '${name}' 항목이 삭제되었으며, 해당 직업 학생들은 무직으로 연동되었습니다.`, "warning");
+                
+                if (editingOriginalJobName === name) {
+                    handleResetJobForm();
+                }
+            } catch (err) {
+                console.error("직업 삭제 실패:", err);
+                alert("직업 정보 처리에 실패했습니다. 보안 규칙을 확인하세요.");
+            } finally {
+                hideSpinner();
             }
-            loadTabData("salary");
-            renderTeacherManageTab(db);
         }
 
+        window.handleSaveJob = handleSaveJob;
         window.handleEditJob = handleEditJob;
         window.handleDeleteJob = handleDeleteJob;
+        window.handleResetJobForm = handleResetJobForm;
+        window.handleSaveStudentJob = handleSaveStudentJob;
+        window.handleStudentJobSelectChange = handleStudentJobSelectChange;
 
         // 급여 대상에 따른 직업 기본급 로드
         function autoLoadStudentJobSalary() {
@@ -3222,6 +3348,7 @@
                     console.error("적금 자동 만기 처리 실패: ", err);
                 }
             }
+        }
 
         // 금융 및 정책 변경
         function saveBankPolicies() {
@@ -6414,6 +6541,7 @@
         window.handleManualMileageAward = handleManualMileageAward;
         window.deleteStudent = deleteStudent;
         window.editStudent = editStudent;
+        window.openEditModal = openEditModal;
         window.updateMileageStudentSelect = updateMileageStudentSelect;
 
         function handleResetStudentPassword(studentId) {
@@ -6437,132 +6565,281 @@
             }
         }
 
-        // 교사용 학생 수정 모달 열기
-        function openTeacherStudentEditModal(studentId) {
-            const db = getDB();
-            const student = db.students.find(s => s.id === studentId);
-            if (!student) {
-                alert("학생 정보를 찾을 수 없습니다.");
-                return;
-            }
+        // 가상 원격 테스트용 및 교사용 학생 수정/삭제 통합 모달 열기
+        function openEditModal(studentId) {
+            try {
+                console.log("수정 모달 작동 시작, 대상 ID:", studentId);
+                window.editingStudentId = studentId;
 
-            window.editingStudentId = studentId;
+                const db = getDB();
+                const student = db.students.find(s => s.id === studentId);
+                if (!student) {
+                    throw new Error("학생 정보를 찾을 수 없습니다. (ID: " + studentId + ")");
+                }
 
-            // 모달 필드에 값 할당
-            document.getElementById('edit-student-id').value = student.id;
-            document.getElementById('edit-student-name').value = student.name || '';
-            document.getElementById('edit-student-pw').value = student.password || '';
-            document.getElementById('edit-student-balance').value = student.balance || 0;
-            document.getElementById('edit-student-mileage').value = student.mileageBalance !== undefined ? student.mileageBalance : (student.mileage || 0);
+                // 모달 각 필드에 현재 학생 정보 매핑
+                document.getElementById('edit-student-name').value = student.name || '';
+                document.getElementById('edit-student-password').value = student.password || '';
+                document.getElementById('edit-student-balance').value = student.balance !== undefined ? student.balance : 0;
+                document.getElementById('edit-student-mileage').value = student.mileageBalance !== undefined ? student.mileageBalance : (student.mileage || 0);
+                document.getElementById('edit-student-salary').value = student.baseSalary !== undefined ? student.baseSalary : 50;
 
-            // 모달 표시
-            const modal = document.getElementById('teacher-student-edit-modal');
-            if (modal) {
-                modal.style.display = 'flex';
+                // 직업 드롭다운 채우기 및 현재 값 선택
+                const jobSelect = document.getElementById('edit-student-job');
+                if (jobSelect) {
+                    jobSelect.innerHTML = '<option value="무직">무직 (미배정)</option>';
+                    db.jobs.forEach(job => {
+                        if (job.name !== '무직') {
+                            const opt = document.createElement('option');
+                            opt.value = job.name;
+                            opt.innerText = `${job.name} (기본급: ${job.baseSalary}${getCurrencyName()})`;
+                            jobSelect.appendChild(opt);
+                        }
+                    });
+                    jobSelect.value = student.job || '무직';
+                }
+
+                // 모달 표시
+                const modal = document.getElementById('edit-student-modal');
+                if (modal) {
+                    modal.style.display = 'flex';
+                } else {
+                    throw new Error("edit-student-modal 요소가 HTML에 없습니다.");
+                }
+            } catch (error) {
+                alert("🚨 수정 모달 에러: " + error.message);
+                console.error(error);
             }
         }
 
-        // 교사용 학생 수정 모달 닫기
+        // 구버전 호환용 별칭
+        function openTeacherStudentEditModal(studentId) { openEditModal(studentId); }
+        function editStudent(studentId) { openEditModal(studentId); }
+
         function closeTeacherStudentEditModal() {
             window.editingStudentId = null;
-            const modal = document.getElementById('teacher-student-edit-modal');
-            if (modal) {
-                modal.style.display = 'none';
-            }
+            const modal = document.getElementById('edit-student-modal');
+            if (modal) modal.style.display = 'none';
         }
 
-        // 교사용 학생 수정 단축 링크 함수
-        function editStudent(studentId) {
-            openTeacherStudentEditModal(studentId);
-        }
-
-        // 교사용 학생 수정 저장
+        // ✅ 변경사항 저장 - Firestore 업데이트 후 로컬 db 즉시 동기화하여 새로고침 없이 반영
         async function handleTeacherStudentEditSubmit() {
-            const studentId = window.editingStudentId;
-            if (!studentId) {
-                alert("수정할 학생 대상이 지정되지 않았습니다.");
-                return;
-            }
-
-            const name = document.getElementById('edit-student-name').value.trim();
-            const password = document.getElementById('edit-student-pw').value.trim();
-            const balanceVal = document.getElementById('edit-student-balance').value.trim();
-            const mileageVal = document.getElementById('edit-student-mileage').value.trim();
-
-            if (!name) {
-                alert("이름을 입력해 주세요.");
-                return;
-            }
-            if (!password) {
-                alert("비밀번호를 입력해 주세요.");
-                return;
-            }
-
-            const balance = parseInt(balanceVal, 10);
-            const mileage = parseInt(mileageVal, 10);
-
-            if (isNaN(balance)) {
-                alert("올바른 잔액(숫자)을 입력해 주세요.");
-                return;
-            }
-            if (isNaN(mileage)) {
-                alert("올바른 마일리지(숫자)를 입력해 주세요.");
-                return;
-            }
-
-            showSpinner("학생 정보를 수정하는 중...");
-
             try {
-                // Firestore users 컬렉션에서 해당 학생 문서 업데이트
-                const studentRef = fs.collection("users").doc(studentId);
-                await studentRef.update({
+                const studentId = window.editingStudentId;
+                if (!studentId) { alert("수정할 학생이 지정되지 않았습니다."); return; }
+
+                const name = document.getElementById('edit-student-name').value.trim();
+                const newPassword = document.getElementById('edit-student-password').value.trim();
+                const job = document.getElementById('edit-student-job').value;
+                const balance = Number(document.getElementById('edit-student-balance').value);
+                const mileage = Number(document.getElementById('edit-student-mileage').value);
+                const baseSalary = Number(document.getElementById('edit-student-salary').value);
+
+                if (!name) { alert("이름을 입력해 주세요."); return; }
+                if (isNaN(balance)) { alert("올바른 잔액(숫자)을 입력해 주세요."); return; }
+                if (isNaN(mileage)) { alert("올바른 마일리지(숫자)를 입력해 주세요."); return; }
+                if (isNaN(baseSalary)) { alert("올바른 월급(숫자)을 입력해 주세요."); return; }
+
+                showSpinner("학생 정보를 수정하는 중...");
+
+                // Firestore 업데이트 데이터 구성 (비밀번호: 빈칸이면 기존 유지)
+                const updateData = {
                     name: name,
-                    password: password,
+                    job: job,
                     balance: balance,
                     mileage: mileage,
-                    mileageBalance: mileage
-                });
+                    mileageBalance: mileage,
+                    baseSalary: baseSalary
+                };
+                if (newPassword) updateData.password = newPassword;
 
-                showToast(`✅ ${name} 학생의 계정이 성공적으로 수정되었습니다!`, "success");
-                closeTeacherStudentEditModal();
+                await fs.collection("users").doc(studentId).update(updateData);
+
+                // ✅ 핵심 수정: Firestore 성공 후 로컬 db.students 배열 즉시 동기화
+                // (onSnapshot이 도달하기 전에 화면을 즉각 갱신하기 위함)
+                const db = getDB();
+                const idx = db.students.findIndex(s => s.id === studentId);
+                if (idx !== -1) {
+                    db.students[idx] = {
+                        ...db.students[idx],
+                        name, job, balance,
+                        mileage, mileageBalance: mileage,
+                        baseSalary,
+                        ...(newPassword ? { password: newPassword } : {})
+                    };
+                    saveDB(db);
+                }
+
+                // 모달 닫기
+                document.getElementById('edit-student-modal').style.display = 'none';
+                window.editingStudentId = null;
+
+                showToast(`✅ ${name} 학생 정보가 수정되었습니다.`, "success");
+
+                // 즉시 리렌더링
+                renderTeacherManageTab(getDB());
+
             } catch (err) {
-                console.error("학생 정보 수정 에러: ", err);
-                alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
+                console.error("❌ 수정 실패:", err);
+                alert("수정 실패: " + err.message);
             } finally {
                 hideSpinner();
             }
         }
 
-        // 교사용 학생 계정 삭제
-        async function deleteStudent(studentId) {
+        // 🗑 모달 내 계정 삭제 버튼 - 삭제 후 로컬 db 즉시 동기화하여 새로고침 없이 반영
+        async function handleDeleteFromModal() {
+            const studentId = window.editingStudentId;
+            if (!studentId) { alert("삭제할 학생이 지정되지 않았습니다."); return; }
+
             const db = getDB();
             const student = db.students.find(s => s.id === studentId);
             const name = student ? student.name : studentId;
 
-            const confirmMsg = `⚠️ 이 학생(${name})의 계정을 삭제하면 통장 잔고와 모든 금융/환경 기록이 파이어베이스에서 영구 삭제됩니다. 정말 삭제하시겠습니까?`;
-            if (!confirm(confirmMsg)) {
-                return;
-            }
+            if (!confirm(`⚠️ ${name} 학생의 계정을 영구 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
 
             showSpinner("학생 계정을 삭제하는 중...");
-
             try {
-                // Firestore users 컬렉션에서 해당 학생 문서 삭제
-                const studentRef = fs.collection("users").doc(studentId);
-                await studentRef.delete();
+                await fs.collection("users").doc(studentId).delete();
 
-                showToast(`✅ ${name} 학생의 계정이 성공적으로 삭제되었습니다!`, "success");
+                // ✅ 핵심 수정: Firestore 삭제 성공 후 로컬 db.students 배열에서 즉시 제거
+                // (onSnapshot이 도달하기 전에 화면을 즉각 갱신하기 위함)
+                const freshDB = getDB();
+                const delIdx = freshDB.students.findIndex(s => s.id === studentId);
+                if (delIdx !== -1) {
+                    freshDB.students.splice(delIdx, 1);
+                    saveDB(freshDB);
+                }
+
+                // 모달 닫기
+                document.getElementById('edit-student-modal').style.display = 'none';
+                window.editingStudentId = null;
+
+                showToast(`✅ ${name} 학생 계정이 삭제되었습니다.`, "success");
+
+                // 즉시 리렌더링
+                renderTeacherManageTab(getDB());
+
             } catch (err) {
-                console.error("학생 계정 삭제 에러: ", err);
-                alert("계정 처리에 실패했습니다. 보안 규칙을 확인하세요.");
+                console.error("❌ 삭제 실패:", err);
+                alert("삭제 실패: " + err.message);
             } finally {
                 hideSpinner();
             }
         }
 
         // 기존 삭제 핸들러 호환용
-        function handleTeacherStudentDelete(studentId) {
-            deleteStudent(studentId);
+        async function deleteStudent(studentId) {
+            const db = getDB();
+            const student = db.students.find(s => s.id === studentId);
+            const name = student ? student.name : studentId;
+            if (!confirm(`⚠️ 이 학생(${name})의 계정을 삭제하시겠습니까?`)) return;
+            showSpinner("학생 계정을 삭제하는 중...");
+            try {
+                await fs.collection("users").doc(studentId).delete();
+                showToast(`✅ ${name} 학생의 계정이 삭제되었습니다!`, "success");
+            } catch (err) {
+                console.error("학생 계정 삭제 에러: ", err);
+                alert("계정 처리에 실패했습니다.");
+            } finally {
+                hideSpinner();
+            }
+        }
+
+        function handleTeacherStudentDelete(studentId) { deleteStudent(studentId); }
+
+        // ✅ 잔액 & 마일리지 직접 관리 [적용] 버튼 핸들러
+        // - Firestore users 컬렉션 즉시 업데이트 (Number 타입 강제 변환)
+        // - 학생 통장 내역(transactions)에 교사 조정 레코드 추가
+        // - 로컬 db.students 즉시 동기화 → 새로고침 없이 화면 반영
+        async function applyBalanceChange(studentId) {
+            const db = getDB();
+            const student = db.students.find(s => s.id === studentId);
+            if (!student) { alert("학생 정보를 찾을 수 없습니다."); return; }
+
+            const balInput   = document.getElementById(`inp-bal-${studentId}`);
+            const milInput   = document.getElementById(`inp-mil-${studentId}`);
+            const reasonInput = document.getElementById(`inp-reason-${studentId}`);
+
+            const newBalRaw = balInput ? balInput.value.trim() : "";
+            const newMilRaw = milInput ? milInput.value.trim() : "";
+            const reason    = reasonInput ? reasonInput.value.trim() : "";
+
+            // 둘 다 비어있으면 안내
+            if (newBalRaw === "" && newMilRaw === "") {
+                alert("변경할 잔액 또는 마일리지를 입력해 주세요.");
+                return;
+            }
+            if (!reason) {
+                alert("변경 사유/내용을 입력해 주세요.");
+                return;
+            }
+
+            const prevBalance = student.balance || 0;
+            const prevMileage = student.mileageBalance !== undefined ? student.mileageBalance : (student.mileage || 0);
+            const newBalance  = newBalRaw !== "" ? Number(newBalRaw) : prevBalance;
+            const newMileage  = newMilRaw !== "" ? Number(newMilRaw) : prevMileage;
+
+            if (isNaN(newBalance) || isNaN(newMileage)) {
+                alert("잔액/마일리지는 숫자만 입력 가능합니다.");
+                return;
+            }
+
+            showSpinner("잔액을 업데이트하는 중...");
+            try {
+                const now = new Date().toISOString();
+                const balDiff = newBalance - prevBalance;
+                const txType  = balDiff >= 0 ? "deposit" : "withdrawal";
+
+                // ① Firestore users 컬렉션 업데이트
+                await fs.collection("users").doc(studentId).update({
+                    balance:       Number(newBalance),
+                    mileage:       Number(newMileage),
+                    mileageBalance: Number(newMileage)
+                });
+
+                // ② 통장 내역(transactions)에 새 레코드 추가
+                const txId = `tx_teacher_adj_${Date.now()}_${studentId}`;
+                await fs.collection("transactions").doc(txId).set({
+                    id:           txId,
+                    studentId:    studentId,
+                    date:         now,
+                    type:         txType,
+                    amount:       Math.abs(balDiff),
+                    balanceAfter: Number(newBalance),
+                    description:  `✏️ 교사 조정: ${reason}`,
+                    isSavingsMaturity: false,
+                    isTeacherAdj: true
+                });
+
+                // ③ 로컬 db 즉시 동기화 (onSnapshot 도달 전 화면 갱신)
+                const idx = db.students.findIndex(s => s.id === studentId);
+                if (idx !== -1) {
+                    db.students[idx] = {
+                        ...db.students[idx],
+                        balance: Number(newBalance),
+                        mileage: Number(newMileage),
+                        mileageBalance: Number(newMileage)
+                    };
+                    saveDB(db);
+                }
+
+                // 입력창 초기화
+                if (balInput)    balInput.value    = "";
+                if (milInput)    milInput.value    = "";
+                if (reasonInput) reasonInput.value = "";
+
+                showToast(`✅ ${student.name} 학생 잔액이 조정되었습니다. (${prevBalance.toLocaleString()} → ${newBalance.toLocaleString()} ${getCurrencyName()})`, "success");
+
+                // ④ 즉시 리렌더링
+                renderTeacherManageTab(getDB());
+
+            } catch (err) {
+                console.error("❌ 잔액 조정 실패:", err);
+                alert("잔액 조정 실패: " + err.message);
+            } finally {
+                hideSpinner();
+            }
         }
 
         // 마일리지 직접 지급 드롭다운 동적 업데이트 함수
