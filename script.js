@@ -6298,33 +6298,37 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             document.body.removeChild(link);
         }
 
-        function handleCSVUpload(event) {
-            const file = event && event.target && event.target.files ? event.target.files[0] : null;
+        async function handleCSVUpload(event) {
+            const input = event && event.target ? event.target : document.getElementById('csv-file-input');
+            const file = input && input.files ? input.files[0] : null;
             const status = document.getElementById('csv-file-status');
+            const instruction = document.getElementById('csv-upload-instruction');
+            const preview = document.getElementById('csv-preview-container');
+
             if (!file) {
                 if (status) status.textContent = "선택된 파일 없음";
                 return;
             }
-            if (status) status.textContent = "선택됨: " + file.name + " (" + Math.ceil(file.size / 1024) + " KB)";
-            const instruction = document.getElementById('csv-upload-instruction');
-            if (instruction) instruction.textContent = "📄 " + file.name + " 읽는 중...";
 
-            // 내려받는 양식은 UTF-8(BOM) CSV입니다. 우선 UTF-8로 읽고,
-            // 깨짐 문자가 발견될 때만 한국어 Excel의 레거시 CP949로 다시 읽습니다.
-            const readAndParse = (encoding, allowFallback) => {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    let text = String(e.target.result || "").replace(/^\uFEFF/, "");
-                    if (allowFallback && text.includes("\uFFFD")) {
-                        readAndParse("EUC-KR", false);
-                        return;
-                    }
-                    parseCSV(text);
-                };
-                reader.onerror = () => showToast("CSV 파일을 읽을 수 없습니다.", "danger");
-                reader.readAsText(file, encoding);
-            };
-            readAndParse("UTF-8", true);
+            if (status) status.textContent = "선택됨: " + file.name + " (" + Math.max(1, Math.ceil(file.size / 1024)) + " KB)";
+            if (instruction) instruction.textContent = "📄 " + file.name + " 읽는 중...";
+            if (preview) preview.style.display = "none";
+
+            try {
+                const buffer = await file.arrayBuffer();
+                let text = new TextDecoder("utf-8").decode(buffer).replace(/^\uFEFF/, "");
+                if (text.includes("\uFFFD")) {
+                    try { text = new TextDecoder("euc-kr").decode(buffer).replace(/^\uFEFF/, ""); } catch (_) {}
+                }
+                parseCSV(text, file.name);
+            } catch (error) {
+                console.error("CSV read error:", error);
+                if (instruction) instruction.textContent = "🚫 CSV 파일 읽기 실패";
+                showToast("CSV 파일을 읽지 못했습니다: " + (error.message || error), "danger");
+            } finally {
+                // 같은 파일을 다시 선택해도 change 이벤트가 발생하도록 초기화
+                if (input) input.value = "";
+            }
         }
 
         function parseCSVLine(line) {
@@ -6334,13 +6338,9 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             for (let i = 0; i < line.length; i++) {
                 const ch = line[i];
                 if (ch === '"') {
-                    if (inQuotes && line[i + 1] === '"') {
-                        current += '"';
-                        i++;
-                    } else {
-                        inQuotes = !inQuotes;
-                    }
-                } else if (ch === ',' && !inQuotes) {
+                    if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+                    else inQuotes = !inQuotes;
+                } else if ((ch === ',' || ch === '\t') && !inQuotes) {
                     values.push(current);
                     current = "";
                 } else {
@@ -6351,60 +6351,74 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             return values;
         }
 
-        function parseCSV(text) {
-            const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
+        function parseCSV(text, fileName = "CSV 파일") {
             const previewTbody = document.getElementById('csv-preview-tbody');
-            previewTbody.innerHTML = "";
+            const preview = document.getElementById('csv-preview-container');
+            const instruction = document.getElementById('csv-upload-instruction');
             tempCSVData = [];
+            if (previewTbody) previewTbody.innerHTML = "";
 
-            if (lines.length <= 1) {
-                showToast("파싱할 CSV 데이터가 부족합니다.", "danger");
+            const normalized = String(text || "").replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+            const lines = normalized.split("\n").filter(line => line.trim() !== "");
+            if (lines.length < 2) {
+                if (instruction) instruction.textContent = "🚫 학생 데이터가 없는 CSV 파일입니다.";
+                showToast("CSV에 헤더와 학생 데이터가 모두 필요합니다.", "danger");
                 return;
             }
 
-            const header = parseCSVLine(lines[0]).map(v => v.trim().replace(/^\uFEFF/, ""));
-            if (header[0] !== "아이디" || header[1] !== "이름") {
-                showToast("CSV 첫 줄의 '아이디, 이름' 항목을 확인해주세요.", "danger");
+            let header = parseCSVLine(lines[0]).map(v => v.trim().replace(/^\uFEFF/, ""));
+            // Excel에서 세미콜론 구분자로 저장된 경우도 허용
+            if (header.length === 1 && lines[0].includes(";")) {
+                header = lines[0].split(";").map(v => v.trim().replace(/^\uFEFF/, ""));
+            }
+            const idIndex = header.findIndex(v => ["아이디","ID","id"].includes(v));
+            const nameIndex = header.findIndex(v => ["이름","성명","name","Name"].includes(v));
+            if (idIndex < 0 || nameIndex < 0) {
+                console.warn("CSV header:", header);
+                if (instruction) instruction.textContent = "🚫 CSV 헤더를 확인해주세요.";
+                showToast("첫 줄에서 '아이디'와 '이름' 열을 찾지 못했습니다.", "danger");
                 return;
             }
+
+            const findIndex = names => header.findIndex(v => names.includes(v));
+            const pwIndex = findIndex(["초기비밀번호","비밀번호","password","Password"]);
+            const jobIndex = findIndex(["직업","job","Job"]);
+            const roleIndex = findIndex(["역할","role","Role"]);
+            const salaryIndex = findIndex(["기본급","월급","baseSalary","salary"]);
 
             for (let i = 1; i < lines.length; i++) {
-                const line = lines[i].trim();
-                if (!line) continue;
-
-                const cols = parseCSVLine(line);
-                if (cols.length < 2) continue;
-
-                const id = (cols[0] || "").trim();
-                const name = (cols[1] || "").trim();
+                let cols = parseCSVLine(lines[i]);
+                if (cols.length === 1 && lines[i].includes(";")) cols = lines[i].split(";");
+                const id = String(cols[idIndex] || "").trim();
+                const name = String(cols[nameIndex] || "").trim();
                 if (!id || !name) continue;
-                const password = cols[2] ? cols[2].trim() : "1234";
-                const job = cols[3] ? cols[3].trim() : "무직";
-                const role = cols[4] ? cols[4].trim() : "";
-                const parsedSalary = cols[5] ? parseInt(String(cols[5]).replace(/[^0-9-]/g, ""), 10) : 50;
-                const baseSalary = isNaN(parsedSalary) ? 50 : parsedSalary;
-
+                const password = pwIndex >= 0 && cols[pwIndex] ? String(cols[pwIndex]).trim() : "1234";
+                const job = jobIndex >= 0 && cols[jobIndex] ? String(cols[jobIndex]).trim() : "무직";
+                const role = roleIndex >= 0 && cols[roleIndex] ? String(cols[roleIndex]).trim() : "";
+                const salaryRaw = salaryIndex >= 0 ? String(cols[salaryIndex] || "") : "";
+                const parsedSalary = parseInt(salaryRaw.replace(/[^0-9-]/g, ""), 10);
+                const baseSalary = Number.isFinite(parsedSalary) ? parsedSalary : 50;
                 tempCSVData.push({ id, name, password, job, role, baseSalary });
 
-                const tr = document.createElement('tr');
-                const cells = [id, name, password, job, role, baseSalary + " 치킨"];
-                cells.forEach((value, idx) => {
-                    const td = document.createElement('td');
-                    td.textContent = value;
-                    if (idx === 5) {
-                        td.style.fontWeight = "bold";
-                        td.style.color = "#d9480f";
-                    }
-                    tr.appendChild(td);
-                });
-                previewTbody.appendChild(tr);
+                if (previewTbody) {
+                    const tr = document.createElement("tr");
+                    [id, name, password, job, role, baseSalary + " 치킨"].forEach((value, idx) => {
+                        const td = document.createElement("td");
+                        td.textContent = value;
+                        if (idx === 5) { td.style.fontWeight = "bold"; td.style.color = "#d9480f"; }
+                        tr.appendChild(td);
+                    });
+                    previewTbody.appendChild(tr);
+                }
             }
 
-            if (tempCSVData.length > 0) {
-                document.getElementById('csv-preview-container').style.display = "block";
-                document.getElementById('csv-upload-instruction').innerText = `📄 ${tempCSVData.length}명의 데이터 파싱 완료!`;
+            if (tempCSVData.length) {
+                if (preview) preview.style.display = "block";
+                if (instruction) instruction.textContent = "✅ " + fileName + " — " + tempCSVData.length + "명 읽기 완료";
+                showToast(tempCSVData.length + "명의 학생 데이터를 읽었습니다.", "success");
             } else {
-                showToast("등록할 학생이 없습니다. 아이디와 이름을 확인해주세요.", "danger");
+                if (instruction) instruction.textContent = "🚫 등록 가능한 학생이 없습니다.";
+                showToast("아이디와 이름이 입력된 학생 행을 찾지 못했습니다.", "danger");
             }
         }
 
@@ -6982,10 +6996,3 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                 }
             }
         });
-
-
-document.addEventListener("change", function(event) {
-    if (event.target && event.target.id === "csv-file-input") {
-        handleCSVUpload(event);
-    }
-});
