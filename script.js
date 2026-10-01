@@ -6302,19 +6302,50 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             const file = event.target.files[0];
             if (!file) return;
 
-            const encodingSelect = document.getElementById('csv-encoding-select');
-            const encoding = encodingSelect ? encodingSelect.value : "EUC-KR";
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const text = e.target.result;
-                parseCSV(text);
+            // 내려받는 양식은 UTF-8(BOM) CSV입니다. 우선 UTF-8로 읽고,
+            // 깨짐 문자가 발견될 때만 한국어 Excel의 레거시 CP949로 다시 읽습니다.
+            const readAndParse = (encoding, allowFallback) => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    let text = String(e.target.result || "").replace(/^\uFEFF/, "");
+                    if (allowFallback && text.includes("\uFFFD")) {
+                        readAndParse("EUC-KR", false);
+                        return;
+                    }
+                    parseCSV(text);
+                };
+                reader.onerror = () => showToast("CSV 파일을 읽을 수 없습니다.", "danger");
+                reader.readAsText(file, encoding);
             };
-            reader.readAsText(file, encoding);
+            readAndParse("UTF-8", true);
+        }
+
+        function parseCSVLine(line) {
+            const values = [];
+            let current = "";
+            let inQuotes = false;
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (ch === '"') {
+                    if (inQuotes && line[i + 1] === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (ch === ',' && !inQuotes) {
+                    values.push(current);
+                    current = "";
+                } else {
+                    current += ch;
+                }
+            }
+            values.push(current);
+            return values;
         }
 
         function parseCSV(text) {
-            const lines = text.split(/\r?\n/);
+            const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/);
             const previewTbody = document.getElementById('csv-preview-tbody');
             previewTbody.innerHTML = "";
             tempCSVData = [];
@@ -6324,31 +6355,41 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                 return;
             }
 
+            const header = parseCSVLine(lines[0]).map(v => v.trim().replace(/^\uFEFF/, ""));
+            if (header[0] !== "아이디" || header[1] !== "이름") {
+                showToast("CSV 첫 줄의 '아이디, 이름' 항목을 확인해주세요.", "danger");
+                return;
+            }
+
             for (let i = 1; i < lines.length; i++) {
                 const line = lines[i].trim();
                 if (!line) continue;
 
-                const cols = line.split(',');
+                const cols = parseCSVLine(line);
                 if (cols.length < 2) continue;
 
-                const id = cols[0].trim();
-                const name = cols[1].trim();
+                const id = (cols[0] || "").trim();
+                const name = (cols[1] || "").trim();
+                if (!id || !name) continue;
                 const password = cols[2] ? cols[2].trim() : "1234";
                 const job = cols[3] ? cols[3].trim() : "무직";
                 const role = cols[4] ? cols[4].trim() : "";
-                const baseSalary = cols[5] ? parseInt(cols[5].trim()) : 50;
+                const parsedSalary = cols[5] ? parseInt(String(cols[5]).replace(/[^0-9-]/g, ""), 10) : 50;
+                const baseSalary = isNaN(parsedSalary) ? 50 : parsedSalary;
 
-                tempCSVData.push({ id, name, password, job, role, baseSalary: isNaN(baseSalary) ? 50 : baseSalary });
+                tempCSVData.push({ id, name, password, job, role, baseSalary });
 
                 const tr = document.createElement('tr');
-                tr.innerHTML = `
-                    <td><code>${id}</code></td>
-                    <td><strong>${name}</strong></td>
-                    <td><code>${password}</code></td>
-                    <td>${job}</td>
-                    <td>${role}</td>
-                    <td style="font-weight:bold; color:#d9480f;">${baseSalary} 치킨</td>
-                `;
+                const cells = [id, name, password, job, role, baseSalary + " 치킨"];
+                cells.forEach((value, idx) => {
+                    const td = document.createElement('td');
+                    td.textContent = value;
+                    if (idx === 5) {
+                        td.style.fontWeight = "bold";
+                        td.style.color = "#d9480f";
+                    }
+                    tr.appendChild(td);
+                });
                 previewTbody.appendChild(tr);
             }
 
@@ -6356,7 +6397,7 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                 document.getElementById('csv-preview-container').style.display = "block";
                 document.getElementById('csv-upload-instruction').innerText = `📄 ${tempCSVData.length}명의 데이터 파싱 완료!`;
             } else {
-                showToast("올바른 CSV 규격이 아닙니다.", "danger");
+                showToast("등록할 학생이 없습니다. 아이디와 이름을 확인해주세요.", "danger");
             }
         }
 
