@@ -965,7 +965,7 @@
                         </div>
 
                         <button class="btn btn-primary" onclick="handleSubmitEnvReport()" style="width: 100%; justify-content: center; margin-top: 10px; padding: 12px; font-weight: bold;">인증서 제출하기 (선생님께 전송)</button>
-                        <button id="btn-env-padlet-share" class="btn btn-secondary" onclick="openClassPadlet()" style="display:none; width:100%; justify-content:center; margin-top:10px; padding:11px; font-weight:bold;">📌 우리 반 환경 Padlet에 공유하기</button>
+                        <button id="btn-env-padlet-share" class="btn btn-secondary" onclick="openClassPadlet()" style="display:none; width:100%; justify-content:center; margin-top:10px; padding:11px; font-weight:bold;">🌿 환경 활동 주소 열기 · 같은 사진도 올려주세요</button>
                     </div>
 
                     <!-- 교사 작성 예시 가이드 상시 노출 -->
@@ -1200,11 +1200,11 @@
                 <!-- 환경 인증 사진 보관 및 Padlet 설정 -->
                 <div class="card" style="margin-top:25px; border:1px solid #99e9f2; background:#f3fcfd;">
                     <div class="view-indicator teacher">교사 전용</div>
-                    <h3 class="card-title">🗂️ 환경 인증 사진 보관 · Padlet 설정</h3>
+                    <h3 class="card-title">🗂️ 환경 인증 사진 보관 · 환경 활동 주소 설정</h3>
                     <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:15px;">승인된 사진은 설정 기간이 지나면 사진 데이터만 삭제되고 보고서·승인·보상 기록은 유지됩니다.</p>
                     <div class="teacher-grid">
                         <div class="form-group"><label style="font-weight:bold;">사진 보관 기간</label><select id="env-photo-retention-days" class="form-control"><option value="3">3일</option><option value="7" selected>7일</option><option value="14">14일</option><option value="30">30일</option></select></div>
-                        <div class="form-group"><label style="font-weight:bold;">환경 활동 Padlet 주소</label><input id="env-padlet-url" class="form-control" type="url" placeholder="https://padlet.com/..."></div>
+                        <div class="form-group"><label style="font-weight:bold;">환경 활동 주소</label><input id="env-padlet-url" class="form-control" type="url" placeholder="https://..."></div>
                     </div>
                     <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:12px;"><button class="btn btn-primary" onclick="handleSaveEnvStorageSettings()" style="flex:1; justify-content:center;">💾 설정 저장</button><button class="btn btn-secondary" onclick="cleanupExpiredEnvImages(true)" style="flex:1; justify-content:center;">🧹 보관기간 지난 사진 정리</button></div>
                 </div>
@@ -2141,7 +2141,7 @@ function doPost(e) {
       </div>
     </div>
 
-    <script src="script.js?v=20261002-0725"></script>
+    <script src="script.js?v=20261002-0755"></script>
 </body>
 </html>
 
