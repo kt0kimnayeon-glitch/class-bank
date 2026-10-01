@@ -936,9 +936,10 @@
                         
                         <div class="form-group">
                             <label style="font-weight: bold;">1. 활동 인증 사진 선택</label>
-                            <div class="env-upload-area" onclick="document.getElementById('env-file-input').click()">
-                                <span id="upload-instruction" style="font-size: 1.1rem; color: var(--text-muted);">📁 이곳을 클릭하여 사진을 업로드해 주세요.</span>
-                                <input type="file" id="env-file-input" style="display: none;" accept="image/*" onchange="previewEnvImage(event)">
+                            <div class="env-upload-area" style="cursor:default;">
+                                <span id="upload-instruction" style="display:block; margin-bottom:10px; font-size:1.05rem; color:var(--text-muted);">📁 아래 버튼을 눌러 활동 사진을 선택하세요.</span>
+                                <input type="file" id="env-file-input" accept="image/*" onchange="previewEnvImage(event)" style="display:block; width:100%; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:#fff;">
+                                <div id="env-file-status" style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);">선택된 사진 없음</div>
                                 <img id="env-preview" class="env-upload-preview" src="#" alt="미리보기">
                             </div>
                         </div>
@@ -2129,7 +2130,7 @@ function doPost(e) {
       </div>
     </div>
 
-    <script src="script.js?v=20261002-0640"></script>
+    <script src="script.js?v=20261002-0700"></script>
 </body>
 </html>
 
