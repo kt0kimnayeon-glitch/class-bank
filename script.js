@@ -681,48 +681,48 @@
 
         let tempEnvGuideImage = null;
 
-        function handleEnvGuideImageUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                tempEnvGuideImage = e.target.result;
-                const previewDiv = document.getElementById('system-env-guide-image-preview');
-                previewDiv.querySelector('img').src = tempEnvGuideImage;
-                previewDiv.style.display = "block";
-            };
-            reader.readAsDataURL(file);
+        async function handleEnvGuideImageUpload(event) {
+            const file=event.target.files[0]; if(!file)return;
+            showSpinner("예시 사진을 준비하는 중입니다...");
+            try {
+                tempEnvGuideImage=await compressEnvImage(file);
+                const previewDiv=document.getElementById('system-env-guide-image-preview');
+                previewDiv.querySelector('img').src=tempEnvGuideImage;
+                previewDiv.style.display="block";
+            } catch(error) {
+                console.error("Env guide image error:",error);
+                event.target.value="";
+                showToast("예시 사진 처리 실패: "+(error.message||error),"danger");
+            } finally {hideSpinner();}
         }
 
-        function handleEnvGuideImageReset() {
-            tempEnvGuideImage = null;
-            const db = getDB();
-            db.systemSettings.envExampleImage = null;
-            saveDB(db);
-            
-            const previewDiv = document.getElementById('system-env-guide-image-preview');
-            previewDiv.querySelector('img').src = "";
-            previewDiv.style.display = "none";
-            document.getElementById('system-env-guide-image-input').value = "";
-            showToast("🗑️ 예시 사진이 초기화되었습니다.", "info");
+        async function handleEnvGuideImageReset() {
+            showSpinner("예시 사진을 삭제하는 중입니다...");
+            try {
+                await fs.collection("settings").doc("system").set({envExampleImage:null},{merge:true});
+                db.systemSettings.envExampleImage=null; tempEnvGuideImage=null;
+                const previewDiv=document.getElementById('system-env-guide-image-preview');
+                previewDiv.querySelector('img').src=""; previewDiv.style.display="none";
+                document.getElementById('system-env-guide-image-input').value="";
+                showToast("예시 사진이 삭제되었습니다.","success");
+            } catch(error){console.error("Env guide reset error:",error);showToast("예시 사진 삭제 실패: "+(error.message||error),"danger");}
+            finally{hideSpinner();}
         }
 
-        function handleSaveEnvGuide() {
-            const db = getDB();
-            const text = document.getElementById('system-env-guide-text').value.trim();
-            
-            db.systemSettings.envExampleText = text;
-            if (tempEnvGuideImage !== null) {
-                db.systemSettings.envExampleImage = tempEnvGuideImage;
-            }
-            
-            saveDB(db);
-            showToast("🌿 환경 실천 보고서 예시 가이드가 저장되었습니다.", "success");
-            
-            if (activeTab === "environment") {
-                loadTabData("environment");
-            }
+        async function handleSaveEnvGuide() {
+            const text=document.getElementById('system-env-guide-text').value.trim();
+            showSpinner("환경 실천 예시 가이드를 저장하는 중입니다...");
+            try {
+                const payload={envExampleText:text};
+                if(tempEnvGuideImage!==null) payload.envExampleImage=tempEnvGuideImage;
+                await fs.collection("settings").doc("system").set(payload,{merge:true});
+                db.systemSettings.envExampleText=text;
+                if(tempEnvGuideImage!==null) db.systemSettings.envExampleImage=tempEnvGuideImage;
+                showToast("환경 실천 보고서 예시 가이드가 저장되었습니다.","success");
+            } catch(error) {
+                console.error("Env guide save error:",error);
+                showToast("환경 실천 예시 가이드 저장 실패: "+(error.message||error),"danger");
+            } finally {hideSpinner();}
         }
 
         function normalizePadletUrl(value) {
