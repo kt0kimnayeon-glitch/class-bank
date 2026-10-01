@@ -40,7 +40,6 @@
         }
         
         const fs = firebase.firestore();
-        const storage = firebase.storage();
 
         // 글로벌 로딩 스피너 제어 함수
         function showSpinner(text = "데이터 처리 중...") {
@@ -275,6 +274,8 @@
                         envExchangeActive: data.envExchangeActive,
                         envExampleText: data.envExampleText,
                         envExampleImage: data.envExampleImage,
+                        envPhotoRetentionDays: Number(data.envPhotoRetentionDays || 7),
+                        envPadletUrl: data.envPadletUrl || "",
                         shopHours: data.shopHours,
                         shopNotice: data.shopNotice
                     };
@@ -733,6 +734,34 @@
             }
         }
 
+        function normalizePadletUrl(value) {
+            const url=(value||"").trim(); if(!url)return "";
+            try { const parsed=new URL(url); if(parsed.protocol!=="https:"||!/(^|\\.)padlet\\.com$/i.test(parsed.hostname))return null; return parsed.href; } catch(_){return null;}
+        }
+        async function handleSaveEnvStorageSettings() {
+            const retentionDays=Number(document.getElementById("env-photo-retention-days")?.value||7);
+            const padletUrl=normalizePadletUrl(document.getElementById("env-padlet-url")?.value||"");
+            if(![3,7,14,30].includes(retentionDays)){showToast("사진 보관 기간을 다시 선택해 주세요.","danger");return;}
+            if(padletUrl===null){showToast("올바른 Padlet 주소(https://padlet.com/...)를 입력해 주세요.","danger");return;}
+            try {await fs.collection("settings").doc("system").set({envPhotoRetentionDays:retentionDays,envPadletUrl:padletUrl},{merge:true});showToast("🌿 환경 사진 보관기간과 Padlet 주소를 저장했습니다.","success");}
+            catch(error){console.error("환경 설정 저장 오류:",error);showToast("🚫 환경 설정 저장 실패: "+error.message,"danger");}
+        }
+        function openClassPadlet() {
+            const url=normalizePadletUrl((getDB().systemSettings||{}).envPadletUrl||"");
+            if(!url){showToast("선생님이 등록한 Padlet 주소가 없습니다.","warning");return;}
+            window.open(url,"_blank","noopener,noreferrer");
+        }
+        async function cleanupExpiredEnvImages(showResult=true) {
+            if(!currentUser||currentUser.role!=="teacher")return 0;
+            const days=Number((getDB().systemSettings||{}).envPhotoRetentionDays||7);
+            const cutoff=Date.now()-days*86400000;
+            const expired=getDB().envReports.filter(rep=>rep.status==="approved"&&rep.image&&!rep.imageDeleted&&(rep.approvedAt||rep.approvedDate)&&new Date(rep.approvedAt||rep.approvedDate).getTime()<=cutoff);
+            if(!expired.length){if(showResult)showToast("정리할 기간 만료 사진이 없습니다.","info");return 0;}
+            const batch=fs.batch();
+            expired.forEach(rep=>batch.update(fs.collection("env_reports").doc(rep.id),{image:firebase.firestore.FieldValue.delete(),imageDeleted:true,imageDeletedAt:new Date().toISOString()}));
+            await batch.commit(); if(showResult)showToast(`🧹 ${expired.length}개의 기간 만료 환경 인증 사진을 정리했습니다.`,"success"); return expired.length;
+        }
+
         function renderSystemTab() {
             const db = getDB();
             const settings = db.systemSettings;
@@ -752,6 +781,8 @@
             document.getElementById('toggle-env-exchange-active').checked = settings.envExchangeActive;
             
             document.getElementById('system-env-guide-text').value = settings.envExampleText || "";
+            const retentionEl=document.getElementById("env-photo-retention-days"); if(retentionEl)retentionEl.value=String(settings.envPhotoRetentionDays||7);
+            const padletEl=document.getElementById("env-padlet-url"); if(padletEl)padletEl.value=settings.envPadletUrl||"";
             
             const previewDiv = document.getElementById('system-env-guide-image-preview');
             if (settings.envExampleImage) {
@@ -4310,87 +4341,59 @@ let editingStudentId = null; // 학생 수정용 임시 공간
         let tempReportImage = null;
         let tempReportFile = null;
 
-        function previewEnvImage(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            tempReportFile = file;
-            const reader = new FileReader();
-            reader.onload = function() {
-                const preview = document.getElementById('env-preview');
-                preview.src = reader.result;
-                preview.style.display = "block";
-                document.getElementById('upload-instruction').style.display = "none";
-                tempReportImage = reader.result;
-            }
-            reader.readAsDataURL(file);
+        async function compressEnvImage(file) {
+            if (!file || !file.type.startsWith("image/")) throw new Error("이미지 파일만 선택할 수 있습니다.");
+            const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(new Error("사진을 읽을 수 없습니다."));r.readAsDataURL(file);});
+            const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=()=>reject(new Error("사진 형식을 처리할 수 없습니다."));i.src=dataUrl;});
+            const scale=Math.min(1,600/Math.max(img.width,img.height));
+            const canvas=document.createElement("canvas"); canvas.width=Math.max(1,Math.round(img.width*scale)); canvas.height=Math.max(1,Math.round(img.height*scale));
+            canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
+            let quality=.58, compressed=canvas.toDataURL("image/jpeg",quality);
+            while(compressed.length>650000 && quality>.32){quality-=.08;compressed=canvas.toDataURL("image/jpeg",quality);}
+            if(compressed.length>750000) throw new Error("압축 후에도 사진 용량이 너무 큽니다. 다른 사진을 선택해 주세요.");
+            return compressed;
+        }
+
+        async function previewEnvImage(event) {
+            const file=event.target.files[0]; if(!file)return;
+            try {
+                showSpinner("사진을 학급은행용으로 압축하는 중입니다...");
+                tempReportFile=file; tempReportImage=await compressEnvImage(file);
+                const preview=document.getElementById('env-preview'); preview.src=tempReportImage; preview.style.display="block";
+                document.getElementById('upload-instruction').style.display="none";
+            } catch(error) {
+                tempReportFile=null; tempReportImage=null; event.target.value="";
+                showToast("🚫 "+error.message,"danger");
+            } finally { hideSpinner(); }
         }
 
         async function handleSubmitEnvReport() {
-            const actType = document.getElementById('env-activity-type').value;
-            const desc = document.getElementById('env-desc').value.trim();
-            if (!tempReportFile) {
-                showToast("인증 사진을 업로드해 주세요.", "danger");
-                return;
-            }
-            if (!desc) {
-                showToast("인증 활동 내용을 구체적으로 입력하세요.", "danger");
-                return;
-            }
-
-            // 날짜 picker 값 사용 (없으면 오늘)
-            const datePicker = document.getElementById('env-report-date');
-            const selectedDate = (datePicker && datePicker.value) ? datePicker.value : new Date().toISOString().split('T')[0];
-
-            if (!confirm("환경 정화 인증 보고서를 제출하시겠습니까?")) return;
-
-            const submitBtn = document.querySelector("#tab-environment button[onclick='handleSubmitEnvReport()']");
-            if (submitBtn) submitBtn.disabled = true;
-            showSpinner("환경 정화 인증 사진 및 보고서를 업로드하는 중입니다...");
-
+            const actType=document.getElementById('env-activity-type').value;
+            const desc=document.getElementById('env-desc').value.trim();
+            if(!tempReportImage){showToast("인증 사진을 선택해 주세요.","danger");return;}
+            if(!desc){showToast("인증 활동 내용을 구체적으로 입력하세요.","danger");return;}
+            const datePicker=document.getElementById('env-report-date');
+            const selectedDate=(datePicker&&datePicker.value)?datePicker.value:new Date().toISOString().split('T')[0];
+            if(!confirm("환경 정화 인증 보고서를 제출하시겠습니까?"))return;
+            const submitBtn=document.querySelector("#tab-environment button[onclick='handleSubmitEnvReport()']");
+            if(submitBtn)submitBtn.disabled=true; showSpinner("환경 인증 보고서를 Firestore에 저장하는 중입니다...");
             try {
-                const reportId = "env_" + Date.now();
-                
-                // Storage 업로드
-                const storageRef = firebase.storage().ref();
-                const fileExtension = tempReportFile.name.split('.').pop() || 'png';
-                const fileRef = storageRef.child(`env_reports/${currentUser.id}_${Date.now()}.${fileExtension}`);
-                
-                await fileRef.put(tempReportFile);
-                const downloadUrl = await fileRef.getDownloadURL();
-
-                // Firestore 저장
+                const reportId="env_"+Date.now();
                 await fs.collection("env_reports").doc(reportId).set({
-                    id: reportId,
-                    studentId: currentUser.id,
-                    studentName: currentUser.name,
-                    image: downloadUrl,
-                    activityType: actType,
-                    desc: desc,
-                    status: "pending",
-                    date: new Date().toISOString(),
-                    activityDate: selectedDate
+                    id:reportId,studentId:currentUser.id,studentName:currentUser.name,image:tempReportImage,
+                    imageDeleted:false,imageStorage:"firestore-compressed",activityType:actType,desc,status:"pending",
+                    date:new Date().toISOString(),activityDate:selectedDate
                 });
-
-                document.getElementById('env-preview').style.display = "none";
-                document.getElementById('upload-instruction').style.display = "block";
-                document.getElementById('env-desc').value = "";
-                if (datePicker) datePicker.value = '';
-                
-                const db = getDB();
-                if (db.envActivityTypes && db.envActivityTypes.length > 0) {
-                    document.getElementById('env-activity-type').value = db.envActivityTypes[0].name;
-                }
-                tempReportImage = null;
-                tempReportFile = null;
-
-                showToast("🌿 환경 인증 신청서가 제출되었습니다. 교사 확인 후 마일리지가 지급됩니다.", "success");
-            } catch (error) {
-                console.error("Error submitting env report: ", error);
-                showToast("🚫 보고서 제출 중 오류가 발생했습니다. 다시 시도해 주세요.", "danger");
-            } finally {
-                if (submitBtn) submitBtn.disabled = false;
-                hideSpinner();
-            }
+                const preview=document.getElementById('env-preview'); preview.style.display="none"; preview.src="#";
+                document.getElementById('upload-instruction').style.display="block";
+                document.getElementById('env-desc').value=""; document.getElementById('env-file-input').value="";
+                if(datePicker)datePicker.value=""; tempReportImage=null;tempReportFile=null;
+                showToast("🌿 환경 인증이 제출되었습니다. 선생님 확인 후 마일리지가 지급됩니다.","success");
+                const padletUrl=(getDB().systemSettings||{}).envPadletUrl;
+                if(padletUrl&&confirm("우리 반 환경 Padlet에도 활동을 공유할까요?"))window.open(padletUrl,"_blank","noopener,noreferrer");
+            } catch(error) {
+                console.error("Error submitting env report:",error); showToast("🚫 보고서 제출 실패: "+error.message,"danger");
+            } finally {if(submitBtn)submitBtn.disabled=false;hideSpinner();}
         }
 
         // 교사용 일별 환경 실천 출석 테이블 렌더링 (Override 데이터 반영) - 가로형 카드 개편
@@ -4447,6 +4450,7 @@ let editingStudentId = null; // 학생 수정용 임시 공간
 
         // --- 교사용 환경인증 갤러리 및 단가/출석 렌더링 ---
         function renderTeacherEnvTab(db) {
+            cleanupExpiredEnvImages(false).catch(err=>console.error("환경 사진 자동 정리 오류:",err));
             // 오늘 날짜 표시 및 picker 초기 세팅
             const todayStr = new Date().toISOString().split('T')[0];
             const datePicker = document.getElementById('env-today-date-picker');
@@ -4737,10 +4741,15 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                     const approvedArchive = studentData.approvedArchive || [];
                     
                     // rep 객체 업데이트 버전 만들기
+                    const approvedAt = new Date().toISOString();
+                    const reportData = reportDoc.data();
                     const updatedRep = {
-                        ...reportDoc.data(),
+                        ...reportData,
+                        image: null,
+                        imageDeleted: !!reportData.imageDeleted,
                         status: "approved",
-                        approvedDate: new Date().toISOString(),
+                        approvedDate: approvedAt,
+                        approvedAt: approvedAt,
                         rewardAmount: rewardAmount
                     };
 
@@ -4756,7 +4765,8 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                     // 2. 보고서 상태 업데이트
                     transaction.update(reportRef, {
                         status: "approved",
-                        approvedDate: new Date().toISOString(),
+                        approvedDate: approvedAt,
+                        approvedAt: approvedAt,
                         rewardAmount: rewardAmount
                     });
 
@@ -4799,7 +4809,7 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             const descEl = document.getElementById('archive-modal-desc');
             const rewardEl = document.getElementById('archive-modal-reward');
 
-            if (imgEl) imgEl.src = rep.image || '';
+            if (imgEl) { if(rep.image){imgEl.src=rep.image;imgEl.style.display="block";}else{imgEl.removeAttribute("src");imgEl.style.display="none";} }
             if (studentEl) studentEl.textContent = rep.studentName;
             if (dateEl) dateEl.textContent = rep.activityDate || new Date(rep.date).toLocaleDateString();
             if (typeEl) typeEl.textContent = rep.activityType || '기타';
@@ -4913,6 +4923,8 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                     guideImgContainer.style.display = "none";
                 }
             }
+
+            const padletBtn=document.getElementById("btn-env-padlet-share"); if(padletBtn)padletBtn.style.display=settings.envPadletUrl?"inline-flex":"none";
 
             // 1. 나의 일일 정산 내역
             const attTbody = document.getElementById('student-env-attendance-tbody');
@@ -6348,63 +6360,42 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             }
         }
 
-        function handleImportCSVData() {
+        async function handleImportCSVData() {
             if (tempCSVData.length === 0) return;
-
-            const db = getDB();
-            let addedCount = 0;
-            let updatedCount = 0;
-
-            tempCSVData.forEach(item => {
-                const existIdx = db.students.findIndex(s => s.id === item.id);
-                if (existIdx === -1) {
-                    db.students.push({
-                        id: item.id,
-                        name: item.name,
-                        password: item.password,
-                        balance: 500, 
-                        isFrozen: false,
-                        job: item.job,
-                        role: item.role,
-                        baseSalary: item.baseSalary,
-                        mileage: 0,
-                        avatar: { face: "smile", hair: "short", accessory: "none" }
-                    });
-                    
-                    db.transactions.push({
-                        id: "tx_init_" + item.id + "_" + Date.now(),
-                        studentId: item.id,
-                        date: new Date().toISOString(),
-                        description: "🍗 학급 경제 시작 초기 보조금",
-                        type: "deposit",
-                        amount: 500,
-                        balanceAfter: 500,
-                        isSavingsMaturity: false
-                    });
-                    
-                    addedCount++;
-                } else {
-                    const student = db.students[existIdx];
-                    student.name = item.name;
-                    student.password = item.password;
-                    student.job = item.job;
-                    student.role = item.role;
-                    student.baseSalary = item.baseSalary;
-                    
-                    db.students[existIdx] = student;
-                    updatedCount++;
+            if (!confirm(`${tempCSVData.length}명의 학생 계정을 Firestore에 등록/갱신하시겠습니까?`)) return;
+            showSpinner("학생 계정을 Firestore에 저장하는 중입니다...");
+            let addedCount = 0, updatedCount = 0;
+            try {
+                for (const item of tempCSVData) {
+                    const userRef = fs.collection("users").doc(item.id);
+                    const existing = await userRef.get();
+                    if (!existing.exists) {
+                        await userRef.set({
+                            id:item.id, name:item.name, password:item.password, balance:500,
+                            isFrozen:false, job:item.job, role:item.role, baseSalary:item.baseSalary,
+                            mileage:0, mileageBalance:0, avatar:{ emoji:"👶", bgColor:"#ffe3e3" }
+                        });
+                        const txId="tx_init_"+item.id+"_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
+                        await fs.collection("transactions").doc(txId).set({
+                            id:txId, studentId:item.id, date:new Date().toISOString(),
+                            description:"🍗 학급 경제 시작 초기 보조금", type:"deposit",
+                            amount:500, balanceAfter:500, isSavingsMaturity:false
+                        });
+                        addedCount++;
+                    } else {
+                        await userRef.update({name:item.name,password:item.password,job:item.job,role:item.role,baseSalary:item.baseSalary});
+                        updatedCount++;
+                    }
                 }
-            });
-
-            saveDB(db);
-            showToast(`✔️ 학생 데이터 반영 완료! (신규 등록: ${addedCount}명, 정보 갱신: ${updatedCount}명)`, "success");
-            
-            document.getElementById('csv-preview-container').style.display = "none";
-            document.getElementById('csv-file-input').value = "";
-            document.getElementById('csv-upload-instruction').innerText = "📁 이곳을 클릭하여 학생 명단 (.csv) 파일을 올리세요.";
-            tempCSVData = [];
-            
-            loadTabData("manage");
+                showToast(`✔️ 학생 계정 Firestore 반영 완료! (신규: ${addedCount}명, 갱신: ${updatedCount}명)`,"success");
+                document.getElementById('csv-preview-container').style.display="none";
+                document.getElementById('csv-file-input').value="";
+                document.getElementById('csv-upload-instruction').innerText="📁 이곳을 클릭하여 학생 명단 (.csv) 파일을 올리세요.";
+                tempCSVData=[]; loadTabData("manage");
+            } catch(error) {
+                console.error("CSV Firestore import error:",error);
+                showToast("🚫 학생 계정 저장 실패: "+error.message,"danger");
+            } finally { hideSpinner(); }
         }
 
         // ==========================================
