@@ -1541,7 +1541,7 @@
                         <label style="font-weight: bold;">1. 학급 명단 CSV 파일 선택</label>
                         <div class="env-upload-area" style="cursor:default;">
                             <span id="csv-upload-instruction" style="display:block; margin-bottom:10px; font-size:1.05rem; color:var(--text-muted);">📁 아래 버튼을 눌러 학생 명단 CSV 파일을 선택하세요.</span>
-                            <input type="file" id="csv-file-input" accept=".csv,text/csv" style="display:block; width:100%; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:#fff;">
+                            <input type="file" id="csv-file-input" accept=".csv,text/csv" onchange="document.getElementById('csv-file-status').textContent='선택됨: '+(this.files[0] ? this.files[0].name : '선택된 파일 없음'); handleCSVUpload(event);" style="display:block; width:100%; padding:10px; border:1px solid var(--border-color); border-radius:8px; background:#fff;">
                             <div id="csv-file-status" style="margin-top:8px; font-size:0.85rem; color:var(--text-muted);">선택된 파일 없음</div>
                         </div>
                     </div>
@@ -2129,7 +2129,7 @@ function doPost(e) {
       </div>
     </div>
 
-    <script src="script.js"></script>
+    <script src="script.js?v=20261002-0630"></script>
 </body>
 </html>
 
