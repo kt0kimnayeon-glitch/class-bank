@@ -4355,15 +4355,25 @@ let editingStudentId = null; // 학생 수정용 임시 공간
         }
 
         async function previewEnvImage(event) {
-            const file=event.target.files[0]; if(!file)return;
+            const input=event&&event.target?event.target:document.getElementById('env-file-input');
+            const file=input&&input.files?input.files[0]:null;
+            const status=document.getElementById('env-file-status');
+            const instruction=document.getElementById('upload-instruction');
+            if(!file){if(status)status.textContent="선택된 사진 없음";return;}
+            if(status)status.textContent="선택됨: "+file.name+" ("+Math.max(1,Math.ceil(file.size/1024))+" KB)";
+            if(instruction)instruction.textContent="📷 사진 압축 중...";
             try {
                 showSpinner("사진을 학급은행용으로 압축하는 중입니다...");
                 tempReportFile=file; tempReportImage=await compressEnvImage(file);
                 const preview=document.getElementById('env-preview'); preview.src=tempReportImage; preview.style.display="block";
-                document.getElementById('upload-instruction').style.display="none";
+                if(instruction)instruction.textContent="✅ 사진 준비 완료";
+                if(status)status.textContent="사진 준비 완료: "+file.name;
             } catch(error) {
-                tempReportFile=null; tempReportImage=null; event.target.value="";
-                showToast("🚫 "+error.message,"danger");
+                console.error("Environment image preview error:",error);
+                tempReportFile=null; tempReportImage=null; input.value="";
+                if(instruction)instruction.textContent="🚫 사진 처리 실패";
+                if(status)status.textContent=error.message||String(error);
+                showToast("🚫 "+(error.message||error),"danger");
             } finally { hideSpinner(); }
         }
 
