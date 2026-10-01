@@ -6496,45 +6496,37 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             }, 5000);
         }
 
-        function handleChangePasswordSubmit() {
+        async function handleChangePasswordSubmit() {
             const currentPw = document.getElementById('change-pw-current').value;
             const newPw = document.getElementById('change-pw-new').value;
             const confirmPw = document.getElementById('change-pw-confirm').value;
+            if (!currentPw || !newPw || !confirmPw) { showToast("모든 비밀번호 필드를 입력해주세요.", "danger"); return; }
+            if (newPw !== confirmPw) { showToast("새 비밀번호와 확인이 일치하지 않습니다.", "danger"); return; }
+            if (currentPw === newPw) { showToast("새 비밀번호는 현재 비밀번호와 달라야 합니다.", "warning"); return; }
+            if (!currentUser || currentUser.role === "teacher") return;
 
-            if (!currentPw || !newPw || !confirmPw) {
-                showToast("모든 비밀번호 필드를 입력해주세요.", "danger");
-                return;
-            }
-
-            const db = getDB();
-            const studentIndex = db.students.findIndex(s => s.id === currentUser.id);
-            if (studentIndex === -1) return;
-
-            const student = db.students[studentIndex];
-            if (student.password !== currentPw) {
-                showToast("현재 비밀번호가 일치하지 않습니다.", "danger");
-                return;
-            }
-
-            if (newPw !== confirmPw) {
-                showToast("새 비밀번호와 확인이 일치하지 않습니다.", "danger");
-                return;
-            }
-
-            if (currentPw === newPw) {
-                showToast("새 비밀번호는 현재 비밀번호와 달라야 합니다.", "warning");
-                return;
-            }
-
-            db.students[studentIndex].password = newPw;
-            saveDB(db);
-            currentUser.password = newPw;
-
-            document.getElementById('change-pw-current').value = '';
-            document.getElementById('change-pw-new').value = '';
-            document.getElementById('change-pw-confirm').value = '';
-
-            showToast("비밀번호가 성공적으로 변경되었습니다.", "success");
+            showSpinner("비밀번호를 변경하는 중입니다...");
+            try {
+                const userRef = fs.collection("users").doc(currentUser.id);
+                const snap = await userRef.get();
+                if (!snap.exists) throw new Error("학생 계정을 찾을 수 없습니다.");
+                const student = snap.data();
+                if (String(student.password) !== String(currentPw)) {
+                    showToast("현재 비밀번호가 일치하지 않습니다.", "danger");
+                    return;
+                }
+                await userRef.update({ password: newPw, passwordUpdatedAt: new Date().toISOString() });
+                const db = getDB();
+                const idx = db.students.findIndex(st => st.id === currentUser.id);
+                if (idx >= 0) db.students[idx].password = newPw;
+                document.getElementById('change-pw-current').value = '';
+                document.getElementById('change-pw-new').value = '';
+                document.getElementById('change-pw-confirm').value = '';
+                showToast("비밀번호가 변경되었습니다. 다음 로그인부터 새 비밀번호를 사용하세요.", "success");
+            } catch (error) {
+                console.error("Password update error:", error);
+                showToast("비밀번호 저장 실패: " + (error.message || error), "danger");
+            } finally { hideSpinner(); }
         }
 
         function openStudentDeleteModal() {
