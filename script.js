@@ -4342,16 +4342,37 @@ let editingStudentId = null; // 학생 수정용 임시 공간
         let tempReportFile = null;
 
         async function compressEnvImage(file) {
-            if (!file || !file.type.startsWith("image/")) throw new Error("이미지 파일만 선택할 수 있습니다.");
-            const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(new Error("사진을 읽을 수 없습니다."));r.readAsDataURL(file);});
-            const img=await new Promise((resolve,reject)=>{const i=new Image();i.onload=()=>resolve(i);i.onerror=()=>reject(new Error("사진 형식을 처리할 수 없습니다."));i.src=dataUrl;});
-            const scale=Math.min(1,600/Math.max(img.width,img.height));
-            const canvas=document.createElement("canvas"); canvas.width=Math.max(1,Math.round(img.width*scale)); canvas.height=Math.max(1,Math.round(img.height*scale));
-            canvas.getContext("2d").drawImage(img,0,0,canvas.width,canvas.height);
-            let quality=.58, compressed=canvas.toDataURL("image/jpeg",quality);
-            while(compressed.length>650000 && quality>.32){quality-=.08;compressed=canvas.toDataURL("image/jpeg",quality);}
-            if(compressed.length>750000) throw new Error("압축 후에도 사진 용량이 너무 큽니다. 다른 사진을 선택해 주세요.");
-            return compressed;
+            if (!file || !String(file.type || "").startsWith("image/")) throw new Error("이미지 파일만 선택할 수 있습니다.");
+            const maxSide=480;
+            const canvas=document.createElement("canvas");
+            let source=null, cleanup=()=>{};
+            try {
+                if ("createImageBitmap" in window) {
+                    source=await Promise.race([
+                        createImageBitmap(file),
+                        new Promise((_,reject)=>setTimeout(()=>reject(new Error("사진 처리 시간이 너무 오래 걸립니다.")),12000))
+                    ]);
+                    cleanup=()=>{try{source.close();}catch(_){}};
+                } else {
+                    const objectUrl=URL.createObjectURL(file);
+                    cleanup=()=>URL.revokeObjectURL(objectUrl);
+                    source=await Promise.race([
+                        new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=()=>reject(new Error("사진 형식을 처리할 수 없습니다."));img.src=objectUrl;}),
+                        new Promise((_,reject)=>setTimeout(()=>reject(new Error("사진 처리 시간이 너무 오래 걸립니다.")),12000))
+                    ]);
+                }
+                const w=source.width||source.naturalWidth, h=source.height||source.naturalHeight;
+                if(!w||!h) throw new Error("사진 크기를 확인할 수 없습니다.");
+                const scale=Math.min(1,maxSide/Math.max(w,h));
+                canvas.width=Math.max(1,Math.round(w*scale)); canvas.height=Math.max(1,Math.round(h*scale));
+                const ctx=canvas.getContext("2d");
+                if(!ctx) throw new Error("브라우저에서 사진 압축 기능을 사용할 수 없습니다.");
+                ctx.drawImage(source,0,0,canvas.width,canvas.height);
+                let quality=.55, compressed=canvas.toDataURL("image/jpeg",quality);
+                while(compressed.length>450000 && quality>.3){quality-=.07;compressed=canvas.toDataURL("image/jpeg",quality);}
+                if(compressed.length>600000) throw new Error("사진을 충분히 압축하지 못했습니다. 다른 사진을 선택해 주세요.");
+                return compressed;
+            } finally { cleanup(); }
         }
 
         async function previewEnvImage(event) {
@@ -6504,6 +6525,27 @@ let editingStudentId = null; // 학생 수정용 임시 공간
             setTimeout(() => {
                 toast.remove();
             }, 5000);
+        }
+
+        async function handleTeacherPasswordChange() {
+            const currentPw=document.getElementById("teacher-pw-current").value;
+            const newPw=document.getElementById("teacher-pw-new").value;
+            const confirmPw=document.getElementById("teacher-pw-confirm").value;
+            const saved=String((getDB().systemSettings||{}).teacherPassword||"1234");
+            if(!currentPw||!newPw||!confirmPw){showToast("모든 비밀번호를 입력해주세요.","danger");return;}
+            if(currentPw!==saved){showToast("현재 교사 비밀번호가 일치하지 않습니다.","danger");return;}
+            if(newPw!==confirmPw){showToast("새 비밀번호와 확인이 일치하지 않습니다.","danger");return;}
+            if(newPw===currentPw){showToast("새 비밀번호는 현재 비밀번호와 달라야 합니다.","warning");return;}
+            showSpinner("교사 비밀번호를 저장하는 중입니다...");
+            try {
+                await fs.collection("settings").doc("system").set({teacherPassword:newPw,teacherPasswordUpdatedAt:new Date().toISOString()},{merge:true});
+                db.systemSettings.teacherPassword=newPw;
+                ["teacher-pw-current","teacher-pw-new","teacher-pw-confirm"].forEach(id=>document.getElementById(id).value="");
+                showToast("교사 비밀번호가 변경되었습니다.","success");
+            } catch(error) {
+                console.error("Teacher password update error:",error);
+                showToast("교사 비밀번호 저장 실패: "+(error.message||error),"danger");
+            } finally {hideSpinner();}
         }
 
         async function handleChangePasswordSubmit() {
