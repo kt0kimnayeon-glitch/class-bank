@@ -520,38 +520,29 @@
             }
         }
 
-        function handleLogoUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            // 파일 크기 제한 (5MB)
-            if (file.size > 5 * 1024 * 1024) {
-                showToast("이미지 파일 크기는 5MB 이하여야 합니다.", "danger");
-                event.target.value = "";
-                return;
-            }
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const db = getDB();
-                db.systemSettings.logoImage = e.target.result;
-                saveDB(db);
-                updateLogo();
-                showToast("🎉 학급 로고 이미지가 변경되었습니다.", "success");
-            };
-            reader.onerror = function() {
-                showToast("이미지 파일 읽기에 실패했습니다.", "danger");
-            };
-            reader.readAsDataURL(file);
+        async function handleLogoUpload(event) {
+            const file=event.target.files[0]; if(!file)return;
+            if(!String(file.type||"").startsWith("image/")){showToast("이미지 파일만 선택할 수 있습니다.","danger");return;}
+            showSpinner("로고 이미지를 저장하는 중입니다...");
+            try {
+                const logoImage=await compressEnvImage(file);
+                await fs.collection("settings").doc("system").set({logoImage},{merge:true});
+                db.systemSettings.logoImage=logoImage; updateLogo();
+                showToast("학급 로고 이미지가 저장되었습니다.","success");
+            } catch(error) {
+                console.error("Logo save error:",error); showToast("로고 저장 실패: "+(error.message||error),"danger");
+            } finally {hideSpinner();}
         }
 
-        function handleLogoReset() {
-            const db = getDB();
-            db.systemSettings.logoImage = null;
-            saveDB(db);
-            updateLogo();
-            document.getElementById('system-logo-input').value = "";
-            showToast("🍗 기본 닭다리 이모지 로고로 환원되었습니다.", "info");
+        async function handleLogoReset() {
+            showSpinner("기본 로고로 복원하는 중입니다...");
+            try {
+                await fs.collection("settings").doc("system").set({logoImage:null},{merge:true});
+                db.systemSettings.logoImage=null; updateLogo();
+                const input=document.getElementById("system-logo-input"); if(input)input.value="";
+                showToast("기본 닭다리 이모지 로고로 복원되었습니다.","success");
+            } catch(error){console.error("Logo reset error:",error);showToast("로고 초기화 실패: "+(error.message||error),"danger");}
+            finally{hideSpinner();}
         }
 
         function handleCurrencyUpload(event) {
@@ -736,19 +727,19 @@
 
         function normalizePadletUrl(value) {
             const url=(value||"").trim(); if(!url)return "";
-            try { const parsed=new URL(url); if(parsed.protocol!=="https:"||!/(^|\\.)padlet\\.com$/i.test(parsed.hostname))return null; return parsed.href; } catch(_){return null;}
+            try { const parsed=new URL(url); if(parsed.protocol!=="https:")return null; return parsed.href; } catch(_){return null;}
         }
         async function handleSaveEnvStorageSettings() {
             const retentionDays=Number(document.getElementById("env-photo-retention-days")?.value||7);
             const padletUrl=normalizePadletUrl(document.getElementById("env-padlet-url")?.value||"");
             if(![3,7,14,30].includes(retentionDays)){showToast("사진 보관 기간을 다시 선택해 주세요.","danger");return;}
-            if(padletUrl===null){showToast("올바른 Padlet 주소(https://padlet.com/...)를 입력해 주세요.","danger");return;}
-            try {await fs.collection("settings").doc("system").set({envPhotoRetentionDays:retentionDays,envPadletUrl:padletUrl},{merge:true});showToast("🌿 환경 사진 보관기간과 Padlet 주소를 저장했습니다.","success");}
+            if(padletUrl===null){showToast("올바른 환경 활동 주소(https://...)를 입력해 주세요.","danger");return;}
+            try {await fs.collection("settings").doc("system").set({envPhotoRetentionDays:retentionDays,envPadletUrl:padletUrl},{merge:true});showToast("🌿 환경 사진 보관기간과 환경 활동 주소를 저장했습니다.","success");}
             catch(error){console.error("환경 설정 저장 오류:",error);showToast("🚫 환경 설정 저장 실패: "+error.message,"danger");}
         }
         function openClassPadlet() {
             const url=normalizePadletUrl((getDB().systemSettings||{}).envPadletUrl||"");
-            if(!url){showToast("선생님이 등록한 Padlet 주소가 없습니다.","warning");return;}
+            if(!url){showToast("선생님이 등록한 환경 활동 주소가 없습니다.","warning");return;}
             window.open(url,"_blank","noopener,noreferrer");
         }
         async function cleanupExpiredEnvImages(showResult=true) {
@@ -4421,7 +4412,7 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                 if(datePicker)datePicker.value=""; tempReportImage=null;tempReportFile=null;
                 showToast("🌿 환경 인증이 제출되었습니다. 선생님 확인 후 마일리지가 지급됩니다.","success");
                 const padletUrl=(getDB().systemSettings||{}).envPadletUrl;
-                if(padletUrl&&confirm("우리 반 환경 Padlet에도 활동을 공유할까요?"))window.open(padletUrl,"_blank","noopener,noreferrer");
+                if(padletUrl&&confirm("환경 활동 주소에도 같은 사진을 올려주세요. 지금 이동할까요?"))window.open(padletUrl,"_blank","noopener,noreferrer");
             } catch(error) {
                 console.error("Error submitting env report:",error); showToast("🚫 보고서 제출 실패: "+error.message,"danger");
             } finally {if(submitBtn)submitBtn.disabled=false;hideSpinner();}
