@@ -268,16 +268,18 @@
                 if (doc.exists) {
                     const data = doc.data();
                     db.systemSettings = {
-                        logoImage: data.logoImage,
-                        shopActive: data.shopActive,
-                        bankActive: data.bankActive,
-                        envExchangeActive: data.envExchangeActive,
-                        envExampleText: data.envExampleText,
-                        envExampleImage: data.envExampleImage,
+                        bankName: data.bankName || "양반후반 학급 은행",
+                        teacherPassword: data.teacherPassword || "1234",
+                        logoImage: data.logoImage || null,
+                        shopActive: data.shopActive !== false,
+                        bankActive: data.bankActive !== false,
+                        envExchangeActive: data.envExchangeActive !== false,
+                        envExampleText: data.envExampleText || "",
+                        envExampleImage: data.envExampleImage || null,
                         envPhotoRetentionDays: Number(data.envPhotoRetentionDays || 7),
                         envPadletUrl: data.envPadletUrl || "",
-                        shopHours: data.shopHours,
-                        shopNotice: data.shopNotice
+                        shopHours: data.shopHours || "평일 09:00 ~ 16:00",
+                        shopNotice: data.shopNotice || ""
                     };
                     db.policies = {
                         freeRate: data.freeRate || 2.0,
