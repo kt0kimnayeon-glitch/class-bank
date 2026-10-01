@@ -6299,8 +6299,15 @@ let editingStudentId = null; // 학생 수정용 임시 공간
         }
 
         function handleCSVUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
+            const file = event && event.target && event.target.files ? event.target.files[0] : null;
+            const status = document.getElementById('csv-file-status');
+            if (!file) {
+                if (status) status.textContent = "선택된 파일 없음";
+                return;
+            }
+            if (status) status.textContent = "선택됨: " + file.name + " (" + Math.ceil(file.size / 1024) + " KB)";
+            const instruction = document.getElementById('csv-upload-instruction');
+            if (instruction) instruction.textContent = "📄 " + file.name + " 읽는 중...";
 
             // 내려받는 양식은 UTF-8(BOM) CSV입니다. 우선 UTF-8로 읽고,
             // 깨짐 문자가 발견될 때만 한국어 Excel의 레거시 CP949로 다시 읽습니다.
@@ -6975,3 +6982,10 @@ let editingStudentId = null; // 학생 수정용 임시 공간
                 }
             }
         });
+
+
+document.addEventListener("change", function(event) {
+    if (event.target && event.target.id === "csv-file-input") {
+        handleCSVUpload(event);
+    }
+});
